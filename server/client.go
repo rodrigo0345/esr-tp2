@@ -43,6 +43,7 @@ func (c *Client) SendSource() {
   defer socket.Close()
 
   fmt.Println("Sending source to: ", c.RtpAddr, c.RtpPort)
+  start := true
 
   for {
     // get the source next frame
@@ -54,7 +55,8 @@ func (c *Client) SendSource() {
     }
 
     // send frame
-    rtpData := MakeRtpPacket(frame, uint16(c.Source.FrameNumber()))
+    rtpData := MakeRtpPacket(frame, uint16(c.Source.FrameNumber()), start)
+    start = false
 
     // join header and payload
     packet := rtpData.GetPacket()

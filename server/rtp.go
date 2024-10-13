@@ -17,12 +17,15 @@ type RTPPacket struct {
 }
 
 // MakeRtpPacket constructs an RTP packet from the given payload and parameters.
-func MakeRtpPacket(payload []byte, frameNumber uint16) *RTPPacket {
+func MakeRtpPacket(payload []byte, frameNumber uint16, start bool) *RTPPacket {
 	version := 2
 	padding := 0
 	extension := 0
 	cc := 0
 	marker := 0
+  if start {
+    marker = 1
+  }
 	pt := 26
 	ssrc := uint32(0)
 	timestamp := uint32(time.Now().UnixNano() / 1000000)
