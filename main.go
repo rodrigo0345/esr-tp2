@@ -66,6 +66,6 @@ func main() {
 	case config.Support:
     support.Support()
 	case config.Client:
-    client.Client()
+    client.Client(instConfig)
 	}
 }
