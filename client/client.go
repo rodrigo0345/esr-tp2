@@ -4,6 +4,7 @@ import (
 	"fmt"
 )
 
+// use web assembly
 func Client() {
-  fmt.Println("Client started")
+  fmt.Println("Client")
 }

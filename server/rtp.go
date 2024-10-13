@@ -23,38 +23,40 @@ func MakeRtpPacket(payload []byte, frameNumber uint16, start bool) *RTPPacket {
 	extension := 0
 	cc := 0
 	marker := 0
-  if start {
-    marker = 1
-  }
-	pt := 26
+	if start {
+		marker = 1 // Set marker if this is the start of a new frame
+	}
+	pt := 26 // MJPEG payload type
 	ssrc := uint32(0)
-	timestamp := uint32(time.Now().UnixNano() / 1000000)
+	timestamp := uint32(time.Now().UnixNano() / 1000000) // Current timestamp in milliseconds
 
 	rtpHeader := make([]byte, HEADER_SIZE)
 
+	// Fill the RTP header fields
 	rtpHeader[0] = (byte(version)<<6 | byte(padding)<<5 | byte(extension)<<4 | byte(cc&0x0F))
-	// Marker and payload type
 	rtpHeader[1] = (byte(marker)<<7 | byte(pt&0x7F))
+
 	// Sequence Number
 	rtpHeader[2] = byte(frameNumber >> 8)   // Upper 8 bits
 	rtpHeader[3] = byte(frameNumber & 0xFF) // Lower 8 bits
+
 	// Timestamp
 	rtpHeader[4] = byte(timestamp >> 24)        // 1st byte
 	rtpHeader[5] = byte(timestamp >> 16 & 0xFF) // 2nd byte
 	rtpHeader[6] = byte(timestamp >> 8 & 0xFF)  // 3rd byte
 	rtpHeader[7] = byte(timestamp & 0xFF)       // 4th byte
+
 	// SSRC
 	rtpHeader[8] = byte(ssrc >> 24)        // 1st byte of SSRC
 	rtpHeader[9] = byte(ssrc >> 16 & 0xFF) // 2nd byte of SSRC
 	rtpHeader[10] = byte(ssrc >> 8 & 0xFF) // 3rd byte of SSRC
-	rtpHeader[11] = byte(ssrc & 0xFF)
+	rtpHeader[11] = byte(ssrc & 0xFF)      // 4th byte of SSRC
 
-	// Create the RTP packet
-	packet := &RTPPacket{
+	// Create and return the RTP packet
+	return &RTPPacket{
 		Header:  rtpHeader,
 		Payload: payload,
 	}
-	return packet
 }
 
 // Decode decodes the RTP packet from the byte stream.
