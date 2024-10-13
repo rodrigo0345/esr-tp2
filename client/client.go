@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	"image/png"
 	"log"
 	"net"
 
@@ -103,7 +102,7 @@ func decodeImage(payload []byte) (image.Image, error) {
 func displayImage(img image.Image, window fyne.Window) {
 	// Convert image to PNG format to be compatible with Fyne canvas
 	var buf bytes.Buffer
-	err := png.Encode(&buf, img)
+	err := jpeg.Encode(&buf, img, nil)
 	if err != nil {
 		log.Printf("Error encoding PNG: %v", err)
 		return
@@ -117,3 +116,4 @@ func displayImage(img image.Image, window fyne.Window) {
 	// Update the window content with the new image
 	window.SetContent(imgCanvas)
 }
+
