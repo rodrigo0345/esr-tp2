@@ -8,7 +8,7 @@ import (
 	"github.com/rodrigo0345/esr-tp2/client"
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/server"
-	"github.com/rodrigo0345/esr-tp2/support"
+	"github.com/rodrigo0345/esr-tp2/presence"
 )
 
 
@@ -39,15 +39,15 @@ func commandParser(command []string) (*config.AppConfigList, error) {
 	case "server":
 		config := config.AppConfigList{Topology: config.Server, VideoUrl: &command[1]}
 		return &config, nil
-	case "support":
-		config := config.AppConfigList{Topology: config.Support, BootstrapUrl: &command[1]}
+	case "presence":
+    config := config.AppConfigList{Topology: config.Presence, ServerUrl: &command[1], Neighbors: command[2:]}
 		return &config, nil
 	case "client":
 		config := config.AppConfigList{Topology: config.Client, VideoUrl: &command[1]}
 		return &config, nil
 	}
 
-	return nil, errors.New("Invalid command, use main.go <server|support|client> <server->video_url>|<support->bootstrap_url>|<client->video_url>")
+	return nil, errors.New("Invalid command, use main.go <server|support|client> <server->video_url>|<presence->nodeip->neighbors>|<client->video_url>")
 }
 
 
@@ -64,7 +64,7 @@ func main() {
 	case config.Server:
 		server.Server(instConfig)
 	case config.Support:
-    support.Support()
+    presence.Presence(instConfig)
 	case config.Client:
     client.Client(instConfig)
 	}

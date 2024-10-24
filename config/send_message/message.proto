@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option go_package = "github.com/rodrigo0345/esr-tp2/config/send_message";
+
+package message;
+
+enum TypeInteraction {
+  NEIGHBOR = 0;
+  TRANSMITION = 1;
+  IS_ALIVE = 2;
+  FAILED = 3;
+}
+
+// Message for sending a chunk of a video or other media
+message Message {
+  string content = 1; // The actual content/message being sent
+  string target = 2;  // The intended recipient or target of the message
+  TypeInteraction type = 3;
+}
+
