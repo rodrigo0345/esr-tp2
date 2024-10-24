@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+option go_package = "github.com/rodrigo0345/esr-tp2/config/protobuf";
+
+package video;
+
+// Enum for video formats
+enum VideoFormat {
+    UNKNOWN = 0;
+    MP4 = 1;
+    MKV = 2;
+    AVI = 3;
+    WEBM = 4;
+}
+
+// Message for a video chunk
+message VideoChunk {
+    int32 sequence_number = 1;         // Order of this chunk in the video stream
+    int64 timestamp = 2;               // Timestamp of the chunk in milliseconds
+    VideoFormat format = 3;            // Video format (MP4, MKV, etc.)
+    bytes data = 4;                    // The raw video chunk data (as byte array)
+    bool is_last_chunk = 5;            // Flag to indicate if this is the last chunk
+}
+

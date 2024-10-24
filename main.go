@@ -57,7 +57,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-  su := config.ServerUrl{Url: "224.0.0.1", Port: 5004}
+  su := config.ServerUrl{Url: "127.0.0.1", Port: 4242}
   instConfig.ServerUrl = &su
 
 	switch instConfig.Topology {

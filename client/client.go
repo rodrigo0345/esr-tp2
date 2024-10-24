@@ -1,119 +1,91 @@
 package client
 
 import (
-	"bytes"
-	"fmt"
-	"image"
-	"image/jpeg"
+	"context"
+	"crypto/tls"
+	"encoding/binary"
+	"io"
 	"log"
-	"net"
+	"os"
+	"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
-	"github.com/pion/rtp"
+	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
+	"github.com/rodrigo0345/esr-tp2/config/protobuf" // Import your generated protobuf package
+	"google.golang.org/protobuf/proto"
 )
 
-// use GUI
 func Client(config *config.AppConfigList) {
-	a := app.New()
-	w := a.NewWindow("RTP Client")
+	// Create a context for the connection
+	ctx := context.Background()
 
-	// Start listening for UDP packets in a separate goroutine
-	go Listen(config, w)
-
-	w.Resize(fyne.NewSize(800, 600))
-	w.ShowAndRun()
-}
-
-
-// Listen listens for incoming RTP packets and processes them
-func Listen(config *config.AppConfigList, window fyne.Window) {
-	addr := fmt.Sprintf("%s:%d", config.ServerUrl.Url, config.ServerUrl.Port)
-	conn, err := net.ListenPacket("udp", addr)
-	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", addr, err)
+	// Dial the QUIC server with the proper signature
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true, // Skip verification for testing purposes
+		NextProtos:         []string{"quic-echo-example"},
 	}
-	defer conn.Close()
+	quicConfig := &quic.Config{} // You can configure QUIC settings here, or leave it nil
 
-	log.Printf("Listening on %s", addr)
+	// Dial the QUIC server
+	session, err := quic.DialAddr(ctx, "localhost:4242", tlsConfig, quicConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	buffer := make([]byte, 1500) // Assuming typical RTP packet size
+	// Open a stream to send and receive data
+	stream, err := session.OpenStreamSync(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Open the video file
+	videoFile, err := os.Open("videos/lol.Mjpeg")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer videoFile.Close()
+
+	// Create a buffer to hold chunks of the video
+	buffer := make([]byte, 1024)            // Adjust chunk size as necessary
+	sequenceNumber := 1                     // Initialize sequence number
+	videoFormat := protobuf.VideoFormat_MP4 // Set the video format (adjust accordingly)
+
 	for {
-		// Read incoming UDP packet
-		n, _, err := conn.ReadFrom(buffer)
-		if err != nil {
-			panic(err)
+		n, err := videoFile.Read(buffer)
+		if err != nil && err != io.EOF {
+			log.Fatal(err)
+		}
+		if n == 0 {
+			break
 		}
 
-		// Process the RTP packet
-		processRTPPacket(buffer[:n], window)
-	}
-}
-
-// processRTPPacket decodes the RTP packet and displays the image
-// Global buffer to accumulate the RTP packets for one image
-var imageBuffer bytes.Buffer
-
-// processRTPPacket decodes the RTP packet and displays the image
-func processRTPPacket(packet []byte, window fyne.Window) {
-	// Unmarshal the RTP packet using the pion/rtp package
-	rtpPacket := &rtp.Packet{}
-	if err := rtpPacket.Unmarshal(packet); err != nil {
-		log.Printf("Failed to unmarshal RTP packet: %v", err)
-		return
-	}
-
-	// Assuming the payload is a JPEG image (PayloadType 26 is JPEG in RTP)
-	if rtpPacket.PayloadType != 26 {
-		log.Printf("Unexpected payload type: %d", rtpPacket.PayloadType)
-		return
-	}
-
-	// Accumulate the payloads in a buffer
-	imageBuffer.Write(rtpPacket.Payload)
-
-	// Check if this is the last packet of the current frame (marker bit set)
-	if rtpPacket.Marker {
-		// Decode and display the image when we receive the last packet
-		img, err := decodeImage(imageBuffer.Bytes())
-		if err != nil {
-			log.Printf("Failed to decode image: %v", err)
-			imageBuffer.Reset() // Clear the buffer in case of an error
-			return
+		videoChunk := &protobuf.VideoChunk{
+			SequenceNumber: int32(sequenceNumber),
+			Timestamp:      time.Now().UnixMilli(),
+			Format:         videoFormat,
+			Data:           buffer[:n],
+			IsLastChunk:    false,
 		}
 
-		displayImage(img, window)
-		imageBuffer.Reset() // Clear the buffer for the next frame
+		serializedChunk, err := proto.Marshal(videoChunk)
+		if err != nil {
+			log.Fatal("Failed to serialize chunk:", err)
+		}
+
+		// Send the length of the message first
+		lengthPrefix := make([]byte, 4)
+		binary.BigEndian.PutUint32(lengthPrefix, uint32(len(serializedChunk)))
+
+		// Send the length prefix followed by the serialized chunk
+		_, err = stream.Write(lengthPrefix)
+		if err != nil {
+			log.Fatal("Failed to send length prefix:", err)
+		}
+		_, err = stream.Write(serializedChunk)
+		if err != nil {
+			log.Fatal("Failed to send chunk:", err)
+		}
+
+		sequenceNumber++
 	}
 }
-
-func decodeImage(payload []byte) (image.Image, error) {
-	// Decode the JPEG image from the RTP payload
-	img, err := jpeg.Decode(bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("Failed to decode JPEG image: %v", err)
-	}
-	return img, nil
-}
-
-// displayImage displays the decoded image on the Fyne window
-func displayImage(img image.Image, window fyne.Window) {
-	// Convert image to PNG format to be compatible with Fyne canvas
-	var buf bytes.Buffer
-	err := jpeg.Encode(&buf, img, nil)
-	if err != nil {
-		log.Printf("Error encoding PNG: %v", err)
-		return
-	}
-
-	// Create an image canvas object
-	imageResource := fyne.NewStaticResource("Image", buf.Bytes())
-	imgCanvas := canvas.NewImageFromResource(imageResource)
-	imgCanvas.FillMode = canvas.ImageFillContain
-
-	// Update the window content with the new image
-	window.SetContent(imgCanvas)
-}
-
