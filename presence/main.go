@@ -9,20 +9,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type Interface struct {
-	Ip   string
-	Port int
-}
-
-// contains the best next node to reach the target
-type RoutesTable struct {
-	Routes map[string]Interface
-}
-
-func (rt *Interface) ToString() string {
-	return fmt.Sprintf("%s:%d", rt.Ip, rt.Port)
-}
-
 type NeighborList struct {
 	content []Interface
 }
@@ -66,10 +52,10 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList) {
 		break
 	case send_message.TypeInteraction_NEIGHBOR:
 		// TODO add the new neighbor to the neighbor list
-    neighborList.AddNeighbor(&Interface{
-      Ip: message.Content,
-      Port: 4242,
-    })
+		neighborList.AddNeighbor(&Interface{
+			Ip:   message.Content,
+			Port: 4242,
+		})
 		break
 	case send_message.TypeInteraction_TRANSMITION:
 		break

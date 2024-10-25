@@ -22,3 +22,19 @@ message VideoChunk {
     bool is_last_chunk = 5;            // Flag to indicate if this is the last chunk
 }
 
+message Interface {
+    string ip = 1;
+    int32 port = 2;
+}
+
+message NextHop {
+    Interface next_node = 1;
+    int32 distance = 2;
+}
+
+message DistanceVectorRouting {
+    // Since maps cannot use message types as keys, we can use a string key instead
+    // and represent the Interface as a string (e.g., "ip:port" format).
+    map<string, NextHop> entries = 1;
+}
+
