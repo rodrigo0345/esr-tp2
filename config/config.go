@@ -1,5 +1,7 @@
 package config
 
+import "github.com/rodrigo0345/esr-tp2/config/protobuf"
+
 // enum with Server, Support, Client
 
 type AppConfig uint8
@@ -18,7 +20,7 @@ type ServerUrl struct {
 type AppConfigList struct {
 	Topology     AppConfig
 	VideoUrl     *string
-	Neighbors []string
-  ServerUrl    *ServerUrl
-  NodeIp *string
+	Neighbors []*protobuf.Interface
+  NodeIP    *protobuf.Interface
+  NodeIp *protobuf.Interface
 }

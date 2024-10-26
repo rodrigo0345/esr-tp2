@@ -59,7 +59,7 @@ func Client(config *config.AppConfigList) {
 			break
 		}
 
-		videoChunk := &protobuf.VideoChunk{
+		videoChunk := &protobuf.ServerVideoChunk{
 			SequenceNumber: int32(sequenceNumber),
 			Timestamp:      time.Now().UnixMilli(),
 			Format:         videoFormat,

@@ -18,7 +18,7 @@ import (
 
 func Server(config *config.AppConfigList) {
 	tls := generateTLS()
-	listenAndServe(tls, config.ServerUrl.Port)
+	listenAndServe(tls, int(config.NodeIP.Port))
 }
 
 func listenAndServe(tls *tls.Config, serverPort int) error {
@@ -66,7 +66,7 @@ func listenAndServe(tls *tls.Config, serverPort int) error {
 					}
 
 					// Unmarshal the protobuf message
-					chunk := &protobuf.VideoChunk{}
+					chunk := &protobuf.ServerVideoChunk{}
 					err = proto.Unmarshal(buf, chunk)
 					if err != nil {
 						log.Println("Failed to unmarshal:", err)

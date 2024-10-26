@@ -71,4 +71,5 @@ message NextHop {
 
 message DistanceVectorRouting {
   map<string, NextHop> entries = 1;
+  Interface source = 2;
 }

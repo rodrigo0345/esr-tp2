@@ -3,15 +3,16 @@ package config
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
+	"time"
 
 	"github.com/quic-go/quic-go"
 )
 
-// SendMessage sends a message to the provided QUIC address and returns the sent message
-func SendMessage(address string, message []byte) ([]byte, error) {
+func StartStream(address string) (quic.Stream, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true, // for testing only, don't use in production
 		NextProtos:         []string{"quic-echo-example"},
@@ -19,63 +20,95 @@ func SendMessage(address string, message []byte) ([]byte, error) {
 
 	session, err := quic.DialAddr(context.Background(), address, tlsConfig, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to dial: %w", err)
 	}
-	defer session.CloseWithError(0, "Client closed")
 
 	// Open a stream
 	stream, err := session.OpenStreamSync(context.Background())
 	if err != nil {
-		return nil, err
-	}
-	defer stream.Close()
-
-	_, err = stream.Write(message)
-	if err != nil {
-    return nil, err
+		return nil, fmt.Errorf("failed to open stream: %w", err)
 	}
 
-	fmt.Printf("Sent message: %x\n", message) // Printing message sent in hex
-	return message, nil
+	return stream, nil
 }
 
-func ReceiveMessage(address string) []byte {
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // for testing only, don't use in production
-		NextProtos:         []string{"quic-echo-example"},
+func CloseStream(stream quic.Stream) {
+	if err := stream.Close(); err != nil {
+		log.Printf("Failed to close stream: %v", err)
 	}
+}
 
-	// Dial the address using QUIC
-	session, err := quic.DialAddr(context.Background(), address, tlsConfig, nil)
-	if err != nil {
-		log.Fatalf("Failed to dial: %v", err)
-	}
-	defer session.CloseWithError(0, "Client closed")
+func SendMessage(stream quic.Stream, message []byte) error {
+	// Create a context with a 10-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Open a stream
-	stream, err := session.OpenStreamSync(context.Background())
-	if err != nil {
-		log.Fatalf("Failed to open stream: %v", err)
-	}
-	defer stream.Close()
+	// Send the length of the message first
+	lengthPrefix := make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthPrefix, uint32(len(message)))
 
-	// Buffer to hold received data
-	buf := make([]byte, 1024)
-	var receivedMessage []byte
-
-	for {
-		// Read from the stream
-		n, err := stream.Read(buf)
+	// Wrap stream.Write in a channel to manage the timeout
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := stream.Write(lengthPrefix)
 		if err != nil {
-			if err == io.EOF {
-				break // End of stream
-			}
-			log.Fatalf("Failed to read message: %v", err)
+			log.Printf("Error writing length prefix: %v", err)
+			writeDone <- err
+			return
 		}
+		_, err = stream.Write(message)
+		writeDone <- err
+	}()
 
-		receivedMessage = append(receivedMessage, buf[:n]...)
-		fmt.Printf("Received message (bytes): %x\n", buf[:n]) // Print received message in hex
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("send message timed out: %w", ctx.Err())
+	case err := <-writeDone:
+		if err != nil {
+			return fmt.Errorf("failed to send message: %w", err)
+		}
 	}
 
-	return receivedMessage
+	return nil
+}
+
+func ReceiveMessage(stream quic.Stream) ([]byte, error) {
+	// Read the 4-byte length prefix with a 10-second timeout
+	lengthBuf := make([]byte, 4)
+	if err := readWithTimeout(stream, lengthBuf, 10*time.Second); err != nil {
+		return nil, fmt.Errorf("failed to read message length: %w", err)
+	}
+
+	messageLength := binary.BigEndian.Uint32(lengthBuf)
+	if messageLength == 0 {
+		return nil, fmt.Errorf("invalid message length: %d", messageLength)
+	}
+
+	// Read the message based on the length with a 10-second timeout
+	buf := make([]byte, messageLength)
+	if err := readWithTimeout(stream, buf, 10*time.Second); err != nil {
+		return nil, fmt.Errorf("failed to read message: %w", err)
+	}
+
+	return buf, nil
+}
+
+// readWithTimeout reads data from the stream with a timeout.
+func readWithTimeout(stream quic.Stream, buf []byte, timeout time.Duration) error {
+	readDone := make(chan error, 1)
+
+	go func() {
+		_, err := io.ReadFull(stream, buf)
+		readDone <- err
+	}()
+
+	select {
+	case err := <-readDone:
+		if err != nil {
+			return fmt.Errorf("read error: %w", err)
+		}
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("read operation timed out after %v", timeout)
+	}
 }
