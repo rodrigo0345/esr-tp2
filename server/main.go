@@ -18,73 +18,70 @@ import (
 
 func Server(config *config.AppConfigList) {
 	tls := generateTLS()
-	listenAndServe(tls, config.ServerUrl.Port)
+	if err := listenAndServe(tlsConfig, config.ServerUrl.Port); err != nil {
+		log.Fatalf("Error starting server: %v", err)
+	}
 }
 
 func listenAndServe(tls *tls.Config, serverPort int) error {
 	port := fmt.Sprintf(":%d", serverPort)
 	listener, err := quic.ListenAddr(port, tls, nil)
 	if err != nil {
-		log.Fatalf("Failed to start QUIC listener: %v", err)
+		return fmt.Errorf("failed to start QUIC listener: %w", err)
 	}
 	fmt.Printf("QUIC server is listening on port %d\n", serverPort)
 
 	for {
-		// Accept incoming QUIC connections
+
 		session, err := listener.Accept(context.Background())
 		if err != nil {
-			log.Fatalf("Failed to accept session: %v", err)
+			return fmt.Errorf("failed to accept session: %w", err)
 		}
 
-		// For each session, handle incoming streams
-		go func() {
-			for {
-				stream, err := session.AcceptStream(context.Background())
-				if err != nil {
-					log.Println("Failed to accept stream:", err)
-					return
-				}
-				defer stream.Close()
+		go handleSession(session)
+	}
+}
 
-				for {
-					// Read the 4-byte length prefix
-					lengthBuf := make([]byte, 4)
-					_, err := io.ReadFull(stream, lengthBuf)
-					if err != nil {
-						log.Println("Failed to read length prefix:", err)
-						return
-					}
+func handleSession(session quic.Session) {
+	for {
+		stream, err := session.AcceptStream(context.Background())
+		if err != nil {
+			log.Println("failed to accept stream:", err)
+			return
+		}
+		defer stream.Close()
 
-					messageLength := binary.BigEndian.Uint32(lengthBuf)
+		if err := processStream(stream); err != nil {
+			log.Println("error processing stream:", err)
+			return
+		}
+	}
+}
 
-					// Read the message of the specified length
-					buf := make([]byte, messageLength)
-					_, err = io.ReadFull(stream, buf)
-					if err != nil {
-						log.Println("Failed to read full message:", err)
-						return
-					}
+func processStream(stream quic.Stream) error {
+	for {
+		lengthBuf := make([]byte, 4)
+		if _, err := io.ReadFull(stream, lengthBuf); err != nil {
+			return fmt.Errorf("failed to read length prefix: %w", err)
+		}
 
-					// Unmarshal the protobuf message
-					chunk := &protobuf.VideoChunk{}
-					err = proto.Unmarshal(buf, chunk)
-					if err != nil {
-						log.Println("Failed to unmarshal:", err)
-						return
-					}
+		messageLength := binary.BigEndian.Uint32(lengthBuf)
 
-					log.Println(chunk)
+		buf := make([]byte, messageLength)
+		if _, err := io.ReadFull(stream, buf); err != nil {
+			return fmt.Errorf("failed to read full message: %w", err)
+		}
 
-					// Send hello message to the client (optional)
-					_, err = stream.Write([]byte("Hello, world!"))
-					if err != nil {
-						log.Println("Failed to write message:", err)
-						return
-					}
-				}
+		chunk := &protobuf.VideoChunk{}
+		if err := proto.Unmarshal(buf, chunk); err != nil {
+			return fmt.Errorf("failed to unmarshal: %w", err)
+		}
 
-			}
-		}()
+		log.Printf("Received video request for: %s", chunk.VideoId)
+
+		if _, err := stream.Write([]byte("Hello, world!")); err != nil {
+			return fmt.Errorf("failed to write message: %w", err)
+		}
 	}
 }
 
