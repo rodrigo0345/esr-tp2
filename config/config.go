@@ -6,7 +6,7 @@ type AppConfig uint8
 
 const (
 	Server AppConfig = iota
-	Support
+	Presence
 	Client
 )
 
@@ -18,6 +18,7 @@ type ServerUrl struct {
 type AppConfigList struct {
 	Topology     AppConfig
 	VideoUrl     *string
-	BootstrapUrl *string
+	Neighbors []string
   ServerUrl    *ServerUrl
+  NodeIp *string
 }
