@@ -29,16 +29,22 @@ func Presence(config *config.AppConfigList) {
 		log.Fatal("ServerUrl is nil")
 	}
 
+  // remove itself from the list of neighbors
+  for i, n := range config.Neighbors {
+    if n.Ip == config.NodeIP.Ip && n.Port == config.NodeIP.Port {
+      config.Neighbors = append(config.Neighbors[:i], config.Neighbors[i+1:]...)
+      break
+    }
+  }
+
 	neighborList := &NeighborList{
 		content: config.Neighbors,
 	}
-	routingTable := distancevectorrouting.CreateDistanceVectorRouting(distancevectorrouting.Interface{Interface: config.NodeIP})
-	routingTable.Print()
+	routingTable := distancevectorrouting.CreateDistanceVectorRouting(config)
 
 	go func() {
 		for {
-			// send our routing table to all neighbors
-			neighborList.PingNeighbors(config, routingTable)
+			routingTable = neighborList.PingNeighbors(config, routingTable)
 			routingTable.Print()
 			time.Sleep(time.Second * 10)
 		}
@@ -51,8 +57,6 @@ func Presence(config *config.AppConfigList) {
 }
 
 func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTable *distancevectorrouting.DistanceVectorRouting) {
-	fmt.Println("Listening")
-
 	tlsConfig := generateTLS()
 
 	// Wait for connections
@@ -73,7 +77,6 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 
 		// Handle the session in a goroutine
 		go func(session quic.Connection) {
-			defer session.CloseWithError(0, "session closed")
 
 			// Accept only one stream for this session
 			stream, err := session.AcceptStream(context.Background())
@@ -81,7 +84,6 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 				log.Printf("Failed to accept stream for session %v: %v", session.RemoteAddr(), err)
 				return
 			}
-			defer stream.Close()
 
 			data, err := config.ReceiveMessage(stream)
 			if err != nil {
@@ -99,22 +101,10 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 
 			switch chunk.Type {
 			case protobuf.RequestType_ROUTINGTABLE:
-				otherDvr := &distancevectorrouting.DistanceVectorRouting{chunk.GetDistanceVectorRouting()}
-				HandleRouting(stream, neighborList, routingTable, otherDvr, chunk.Timestamp)
+        otherDvr := &distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: chunk.GetDistanceVectorRouting()}
+				HandleRouting(session, cnf, stream, neighborList, routingTable, otherDvr, chunk.Timestamp)
 			case protobuf.RequestType_RETRANSMIT:
 				// TODO: handle retransmit
-			}
-
-			// chunkJSON, err := json.MarshalIndent(chunk, "", "  ")
-			// if err != nil {
-			// 	log.Printf("Failed to marshal chunk from %v: %v", session.RemoteAddr(), err)
-			// 	return
-			// }
-			// log.Printf("Processed chunk from %v: %s", session.RemoteAddr(), chunkJSON)
-
-			if err != nil {
-				log.Printf("Failed to write message to %v: %v", stream.StreamID(), err)
-				return
 			}
 		}(session)
 	}

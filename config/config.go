@@ -1,6 +1,12 @@
 package config
 
-import "github.com/rodrigo0345/esr-tp2/config/protobuf"
+import (
+	"log"
+	"net"
+	"strconv"
+
+	"github.com/rodrigo0345/esr-tp2/config/protobuf"
+)
 
 // enum with Server, Support, Client
 
@@ -13,14 +19,28 @@ const (
 )
 
 type ServerUrl struct {
-  Url string
-  Port int
+	Url  string
+	Port int
 }
 
 type AppConfigList struct {
-	Topology     AppConfig
-	VideoUrl     *string
+	Topology  AppConfig
+	VideoUrl  *string
 	Neighbors []*protobuf.Interface
-  NodeIP    *protobuf.Interface
-  NodeIp *protobuf.Interface
+	NodeIP    *protobuf.Interface
+	NodeName  string
 }
+
+// ToInterface converts a string address (ip:port) into a protobuf.Interface.
+func ToInterface(addr string) *protobuf.Interface {
+	ip, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return &protobuf.Interface{Ip: ip, Port: int32(p)}
+}
+

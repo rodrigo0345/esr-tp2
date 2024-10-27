@@ -3,7 +3,6 @@ module github.com/rodrigo0345/esr-tp2
 go 1.23.2
 
 require (
-	github.com/gorilla/websocket v1.5.3
 	github.com/quic-go/quic-go v0.48.1
 	google.golang.org/protobuf v1.33.0
 )

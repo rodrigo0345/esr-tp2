@@ -12,7 +12,7 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-func StartStream(address string) (quic.Stream, error) {
+func StartStream(address string) (quic.Stream, quic.Connection, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true, // for testing only, don't use in production
 		NextProtos:         []string{"quic-echo-example"},
@@ -20,16 +20,16 @@ func StartStream(address string) (quic.Stream, error) {
 
 	session, err := quic.DialAddr(context.Background(), address, tlsConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial: %w", err)
+		return nil, nil, fmt.Errorf("failed to dial: %w", err)
 	}
 
 	// Open a stream
 	stream, err := session.OpenStreamSync(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to open stream: %w", err)
+		return nil, nil, fmt.Errorf("failed to open stream: %w", err)
 	}
 
-	return stream, nil
+	return stream, session, nil
 }
 
 func CloseStream(stream quic.Stream) {

@@ -11,7 +11,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func HandleRouting(stream quic.Stream, nl *NeighborList, dvr *distancevectorrouting.DistanceVectorRouting, otherDvr *distancevectorrouting.DistanceVectorRouting, timeTook int32) {
+func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.Stream, nl *NeighborList, dvr *distancevectorrouting.DistanceVectorRouting, otherDvr *distancevectorrouting.DistanceVectorRouting, timeTook int32) {
+
+	// the source needs to be updated only when sending the routing table
+	remote := conn.RemoteAddr().String()
 
 	// send our routing table back
 	msg := protobuf.Header{
@@ -20,10 +23,15 @@ func HandleRouting(stream quic.Stream, nl *NeighborList, dvr *distancevectorrout
 		Timestamp: int32(time.Now().UnixMilli()),
 
 		Content: &protobuf.Header_DistanceVectorRouting{
-			DistanceVectorRouting: dvr.DistanceVectorRouting,
+			DistanceVectorRouting: dvr.Dvr,
 		},
 	}
 	msg.Length = int32(proto.Size(&msg))
+
+	local := conn.LocalAddr().String()
+	in := config.ToInterface(local)
+	in.Port = cnf.NodeIP.Port
+	msg.Sender = in.String()
 
 	data, err := proto.Marshal(&msg)
 	if err != nil {
@@ -37,8 +45,8 @@ func HandleRouting(stream quic.Stream, nl *NeighborList, dvr *distancevectorrout
 		return
 	}
 
-	// TODO: handle race condition
-	dvr.WeakUpdate(otherDvr, timeTook)
+	in = config.ToInterface(remote)
+	in.Port = otherDvr.Dvr.Source.Port
 
-	nl.AddNeighbor(otherDvr.Source)
+	nl.AddNeighbor(in, cnf)
 }

@@ -3,6 +3,7 @@ package presence
 import (
 	"fmt"
 	"log"
+	_ "net"
 	"sync"
 	"time"
 
@@ -12,8 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting) {
-	fmt.Println("Synchronizing neighbors...")
+func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting) *distancevectorrouting.DistanceVectorRouting {
 
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
@@ -21,9 +21,6 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 		Timestamp: int32(time.Now().UnixMilli()),
 		Sender:    cnf.NodeIP.String(),
 		Target:    "",
-		Content: &protobuf.Header_DistanceVectorRouting{
-			DistanceVectorRouting: dvr.DistanceVectorRouting,
-		},
 	}
 	msg.Length = int32(proto.Size(&msg))
 
@@ -45,22 +42,32 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			nb := distancevectorrouting.Interface{Interface: neighbor}
 			fmt.Printf("Pinging %s\n", nb.ToString())
 
+			// Start a new QUIC stream
+			stream, conn, err := config.StartStream(nb.ToString())
+			if err != nil {
+				log.Printf("Error starting stream to %s: %v\n", nb.ToString(), err)
+				return
+			}
+			defer config.CloseStream(stream)
+
 			msg.Target = nb.ToString()
 			msg.Timestamp = int32(time.Now().UnixMilli())
+			dvr.UpdateSource(distancevectorrouting.Interface{Interface: &protobuf.Interface{
+				Ip:   cnf.NodeIP.String(),
+				Port: cnf.NodeIP.Port,
+			}})
+			msg.Content = &protobuf.Header_DistanceVectorRouting{
+				DistanceVectorRouting: dvr.Dvr,
+			}
+
+			fmt.Println("Sending ping to", nb.ToString())
+			fmt.Println("Sender is", msg.Sender)
 
 			data, err := proto.Marshal(&msg)
 			if err != nil {
 				log.Printf("Error marshaling ping: %v\n", err)
 				return
 			}
-
-			// Start a new QUIC stream
-			stream, err := config.StartStream(nb.ToString())
-			if err != nil {
-				log.Printf("Error starting stream to %s: %v\n", nb.ToString(), err)
-				return
-			}
-			defer config.CloseStream(stream)
 
 			if err := config.SendMessage(stream, data); err != nil {
 				log.Printf("Error sending ping to %s: %v\n", nb.ToString(), err)
@@ -79,6 +86,9 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 				return
 			}
 
+			response.Sender = conn.RemoteAddr().String()
+			fmt.Println("Received response from", response.Sender)
+
 			if response.Type != protobuf.RequestType_ROUTINGTABLE {
 				log.Printf("Error: received response is not a routing table from %s", nb.ToString())
 				return
@@ -88,10 +98,11 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			timeTook := time.UnixMilli(int64(response.Timestamp)).Sub(time.UnixMilli(int64(msg.Timestamp)))
 
 			// Log successful response for debugging
-			log.Printf("Received routing table from %s, time took: %v", nb.ToString(), timeTook)
+			// log.Printf("Received routing table from %s, time took: %v", nb.ToString(), timeTook)
+			in := config.ToInterface(response.Sender)
 
 			results <- &NeighborResult{
-				Neighbor:     neighbor,
+				Neighbor:     in,
 				Time:         timeTook,
 				RoutingTable: routingTable,
 			}
@@ -101,12 +112,20 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 	wg.Wait()
 	close(results)
 
+	// update the neighbor list
+	if len(nbl.content) > 1 {
+		nbl.RemoveAll()
+	}
+
 	// Process results from the channel
 	routingTables := make([]distancevectorrouting.DistanceVectorRouting, 0)
 	distances := make([]distancevectorrouting.RequestRoutingDelay, 0)
 	for result := range results {
-		nbl.AddNeighbor(result.Neighbor)
-		routingTables = append(routingTables, distancevectorrouting.DistanceVectorRouting{result.RoutingTable})
+		nbl.AddNeighbor(result.Neighbor, cnf)
+		dvr := distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: result.RoutingTable}
+
+		dvr.UpdateSource(distancevectorrouting.Interface{Interface: result.Neighbor})
+		routingTables = append(routingTables, dvr)
 
 		distances = append(distances, distancevectorrouting.RequestRoutingDelay{
 			Neighbor: distancevectorrouting.Interface{Interface: result.Neighbor},
@@ -116,17 +135,19 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 
 	// Also append itself to the routing table
 	tmp := map[string]*protobuf.NextHop{
-		distancevectorrouting.Interface{Interface: cnf.NodeIP}.ToString(): {
+		cnf.NodeName: {
 			NextNode: cnf.NodeIP,
 			Distance: 0,
 		},
 	}
 	myTable := distancevectorrouting.DistanceVectorRouting{
-		DistanceVectorRouting: &protobuf.DistanceVectorRouting{
+		Mutex: sync.Mutex{},
+		Dvr: &protobuf.DistanceVectorRouting{
 			Source:  cnf.NodeIP,
 			Entries: tmp,
 		},
 	}
+
 	routingTables = append(routingTables, myTable)
 	distances = append(distances, distancevectorrouting.RequestRoutingDelay{
 		Neighbor: distancevectorrouting.Interface{Interface: cnf.NodeIP},
@@ -134,18 +155,27 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 	})
 
 	// Update the content of the routing table
-	*dvr = *distancevectorrouting.NewRouting(cnf.NodeIP, routingTables, distances)
+	return distancevectorrouting.NewRouting(cnf.NodeIP, routingTables, distances)
 }
 
-func (n *NeighborList) AddNeighbor(neighbor *protobuf.Interface) {
+func (n *NeighborList) AddNeighbor(neighbor *protobuf.Interface, cnf *config.AppConfigList) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 
-	// check if the neighbor is already in the list
 	if n.HasNeighbor(neighbor) {
 		return
 	}
+
+	if neighbor.Ip == cnf.NodeIP.Ip && neighbor.Port == cnf.NodeIP.Port {
+		return
+	}
 	n.content = append(n.content, neighbor)
+}
+
+func (n *NeighborList) RemoveAll() {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	n.content = make([]*protobuf.Interface, 0)
 }
 
 func (nl *NeighborList) RemoveNeighbor(neighbor *protobuf.Interface) {
@@ -169,4 +199,3 @@ func (n *NeighborList) HasNeighbor(neighbor *protobuf.Interface) bool {
 	}
 	return false
 }
-
