@@ -29,14 +29,6 @@ func Presence(config *config.AppConfigList) {
 		log.Fatal("ServerUrl is nil")
 	}
 
-  // remove itself from the list of neighbors
-  for i, n := range config.Neighbors {
-    if n.Ip == config.NodeIP.Ip && n.Port == config.NodeIP.Port {
-      config.Neighbors = append(config.Neighbors[:i], config.Neighbors[i+1:]...)
-      break
-    }
-  }
-
 	neighborList := &NeighborList{
 		content: config.Neighbors,
 	}

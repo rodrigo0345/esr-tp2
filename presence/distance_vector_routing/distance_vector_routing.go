@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
@@ -106,6 +107,36 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 	}
 
 	return newRoutingTable
+}
+
+func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *DistanceVectorRouting, timeTook int32) {
+  dvr.Lock()
+  defer dvr.Unlock()
+
+	L := time.Since(time.UnixMilli(int64(timeTook)))
+
+	for dest, nextHop := range other.Dvr.Entries {
+		// Skip updating if the destination is this node
+		if dest == cnf.NodeName {
+			continue
+		}
+
+		// Calculate the new distance considering the time delay
+		newDistance := nextHop.Distance + int32(L)
+
+		// Retrieve the current data in our routing table for this destination
+		currentData, found := dvr.Dvr.Entries[dest]
+
+		// Update if:
+		// - The destination is not found (new route)
+		// - The new route through the neighbor is shorter
+		if !found || newDistance < currentData.Distance {
+			dvr.Dvr.Entries[dest] = &protobuf.NextHop{
+				NextNode: other.Dvr.Source,
+				Distance: newDistance,
+			}
+		}
+	}
 }
 
 func (dvr *DistanceVectorRouting) Remove(dest Interface) {

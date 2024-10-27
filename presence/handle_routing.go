@@ -48,5 +48,6 @@ func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.
 	in = config.ToInterface(remote)
 	in.Port = otherDvr.Dvr.Source.Port
 
+  dvr.WeakUpdate(cnf, otherDvr, timeTook)
 	nl.AddNeighbor(in, cnf)
 }
