@@ -156,10 +156,10 @@ func (dvr *DistanceVectorRouting) UpdateLocalSource(nodeName string, realPort in
 	}
 }
 
-func (dvr *DistanceVectorRouting) GetNextHop(dest Interface) (*protobuf.NextHop, error) {
-	nextHop, found := dvr.Dvr.Entries[dest.ToString()]
+func (dvr *DistanceVectorRouting) GetNextHop(dest string) (*protobuf.NextHop, error) {
+	nextHop, found := dvr.Dvr.Entries[dest]
 	if !found {
-		return nil, fmt.Errorf("Destination %s not found", Interface(dest).ToString())
+		return nil, fmt.Errorf("Destination %s not found", dest)
 	}
 	return nextHop, nil
 }

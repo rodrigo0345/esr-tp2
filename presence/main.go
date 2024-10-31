@@ -24,7 +24,6 @@ type NeighborList struct {
 }
 
 func Presence(config *config.AppConfigList) {
-	// create its table
 	if config.NodeIP == nil {
 		log.Fatal("ServerUrl is nil")
 	}
@@ -41,7 +40,6 @@ func Presence(config *config.AppConfigList) {
 			time.Sleep(time.Second * 10)
 		}
 	}()
-	// identify and alert neighbors, if some neighbors are not reachable, they will be removed from the routing table
 
 	fmt.Printf("Node is running on %s\n", distancevectorrouting.Interface{Interface: config.NodeIP}.ToString())
 
@@ -60,17 +58,14 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 	fmt.Printf("QUIC server is listening on port %d\n", cnf.NodeIP.Port)
 
 	for {
-		// Accept incoming QUIC connections
 		session, err := listener.Accept(context.Background())
 		if err != nil {
 			log.Printf("Failed to accept session: %v", err)
-			continue // Log error and continue accepting other sessions
+			continue
 		}
 
-		// Handle the session in a goroutine
 		go func(session quic.Connection) {
 
-			// Accept only one stream for this session
 			stream, err := session.AcceptStream(context.Background())
 			if err != nil {
 				log.Printf("Failed to accept stream for session %v: %v", session.RemoteAddr(), err)
@@ -83,7 +78,6 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 				return
 			}
 
-			// Unmarshal the protobuf message
 			chunk := &protobuf.Header{}
 			err = proto.Unmarshal(data, chunk)
 			if err != nil {
@@ -93,10 +87,10 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 
 			switch chunk.Type {
 			case protobuf.RequestType_ROUTINGTABLE:
-        otherDvr := &distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: chunk.GetDistanceVectorRouting()}
+				otherDvr := &distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: chunk.GetDistanceVectorRouting()}
 				HandleRouting(session, cnf, stream, neighborList, routingTable, otherDvr, chunk.Timestamp)
 			case protobuf.RequestType_RETRANSMIT:
-				// TODO: handle retransmit
+				HandleRetransmit(session, cnf, stream, neighborList, routingTable, chunk)
 			}
 		}(session)
 	}
