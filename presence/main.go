@@ -33,9 +33,12 @@ func Presence(config *config.AppConfigList) {
 	}
 	routingTable := distancevectorrouting.CreateDistanceVectorRouting(config)
 
+  // used to reduce the time spent opening and closing connections
+  neighborsConnectionsMap := distancevectorrouting.NewNeighborsConnectionsMap()
+
 	go func() {
 		for {
-			routingTable = neighborList.PingNeighbors(config, routingTable)
+			routingTable = neighborList.PingNeighbors(config, routingTable, neighborsConnectionsMap)
 			routingTable.Print()
 			time.Sleep(time.Second * 10)
 		}
@@ -43,10 +46,10 @@ func Presence(config *config.AppConfigList) {
 
 	fmt.Printf("Node is running on %s\n", distancevectorrouting.Interface{Interface: config.NodeIP}.ToString())
 
-	MainListen(config, neighborList, routingTable)
+	MainListen(config, neighborList, neighborsConnectionsMap, routingTable)
 }
 
-func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTable *distancevectorrouting.DistanceVectorRouting) {
+func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, neighborsConnectionsMap *distancevectorrouting.NeighborsConnectionsMap, routingTable *distancevectorrouting.DistanceVectorRouting) {
 	tlsConfig := generateTLS()
 
 	// Wait for connections
@@ -58,7 +61,7 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 	fmt.Printf("QUIC server is listening on port %d\n", cnf.NodeIP.Port)
 
 	for {
-		session, err := listener.Accept(context.Background())
+		connection, err := listener.Accept(context.Background())
 		if err != nil {
 			log.Printf("Failed to accept session: %v", err)
 			continue
@@ -90,9 +93,9 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, routingTa
 				otherDvr := &distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: chunk.GetDistanceVectorRouting()}
 				HandleRouting(session, cnf, stream, neighborList, routingTable, otherDvr, chunk.Timestamp)
 			case protobuf.RequestType_RETRANSMIT:
-				HandleRetransmit(session, cnf, stream, neighborList, routingTable, chunk)
+				HandleRetransmit(session, cnf, stream, neighborList, routingTable, chunk, neighborsConnectionsMap)
 			}
-		}(session)
+		}(connection)
 	}
 }
 

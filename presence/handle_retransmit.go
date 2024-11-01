@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream quic.Stream, neighborList *NeighborList, routingTable *distancevectorrouting.DistanceVectorRouting, data *protobuf.Header) {
+func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream quic.Stream, neighborList *NeighborList, routingTable *distancevectorrouting.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *distancevectorrouting.NeighborsConnectionsMap) {
 	target := data.GetTarget()
 	nextHop, err := routingTable.GetNextHop(target)
 
@@ -21,47 +21,41 @@ func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream
 
 	// open a connection with nextHop and try to send the message
 	// if it fails, send to another neighbor, and remove it from the list
-	connectionEstablished := false
 	neighbor := nextHop.NextNode
 	nextNeighbor := 0
 
-	var newStream quic.Stream
-	var conn quic.Connection
-	for !connectionEstablished {
-		newStream, conn, err = config.StartStream(neighbor.String())
+  // propagate the message to the next neighbor
+	for {
+		var msg []byte
+    neighborStream, _, err := neighborsConnectionsMap.GetConnectionStream(neighbor.String())
+	  defer config.CloseStream(neighborStream)
+
 		if err != nil {
 			log.Printf("Error starting stream to %s: %v\n", nextHop.String(), err)
-			// try with another neighbor
-			neighbor = neighborList.content[nextNeighbor]
-			nextNeighbor++
-			continue
+			goto fail
 		}
 
-		var msg []byte
 		msg, err = proto.Marshal(data)
-		err = config.SendMessage(newStream, msg)
+		err = config.SendMessage(neighborStream, msg)
 		if err != nil {
 			log.Printf("Error sending message: %v\n", err)
-			// try with another neighbor
-			neighbor = neighborList.content[nextNeighbor]
-			nextNeighbor++
-			continue
+			goto fail
 		}
 
-    // wait to get a confirmation from the other side
-    _, err = config.ReceiveMessage(newStream)
-    if err != nil {
+		// wait to get a confirmation from the other side
+		_, err = config.ReceiveMessage(neighborStream)
+		if err != nil {
 			log.Printf("Error receiving message: %v\n", err)
-			// try with another neighbor
-			neighbor = neighborList.content[nextNeighbor]
-			nextNeighbor++
-			continue
+			goto fail
 		}
 
-		connectionEstablished = true
-	}
+		break
 
-  defer conn.CloseWithError(0, "")
-	defer config.CloseStream(newStream)
+	fail:
+		// try with another neighbor
+		neighbor = neighborList.content[nextNeighbor]
+		nextNeighbor++
+		continue
+	}
 
 }

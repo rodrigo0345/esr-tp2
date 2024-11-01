@@ -61,6 +61,7 @@ type RequestRoutingDelay struct {
 	Delay    int
 }
 
+
 func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVectorRouting, requestRoutingDelay []RequestRoutingDelay) *DistanceVectorRouting {
 
 	// Create a new DistanceVectorRouting instance to hold the combined routing table

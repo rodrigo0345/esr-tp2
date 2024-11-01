@@ -12,30 +12,49 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-func StartStream(address string) (quic.Stream, quic.Connection, error) {
+func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true, // for testing only, don't use in production
 		NextProtos:         []string{"quic-echo-example"},
 	}
 
-	session, err := quic.DialAddr(context.Background(), address, tlsConfig, nil)
+	connection, err := quic.DialAddr(context.Background(), address, tlsConfig, &quic.Config{
+    KeepAlivePeriod: 60 * time.Second,
+  })
+
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to dial: %w", err)
 	}
 
 	// Open a stream
-	stream, err := session.OpenStreamSync(context.Background())
+	stream, err := connection.OpenStreamSync(context.Background())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open stream: %w", err)
 	}
 
-	return stream, session, nil
+	return stream, connection, nil
+}
+
+func CreateStream(conn quic.Connection) (quic.Stream, error) {
+  stream, err := conn.OpenStreamSync(context.Background())
+  if err != nil {
+    return nil, fmt.Errorf("failed to open stream: %w", err)
+  }
+  return stream, nil
 }
 
 func CloseStream(stream quic.Stream) {
 	if err := stream.Close(); err != nil {
 		log.Printf("Failed to close stream: %v", err)
 	}
+}
+
+func IsConnectionOpen(stream quic.Stream) bool {
+    _, err := stream.Write([]byte("ping"))
+    if err != nil {
+        return false
+    }
+    return true
 }
 
 func SendMessage(stream quic.Stream, message []byte) error {

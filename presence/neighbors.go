@@ -13,7 +13,13 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting) *distancevectorrouting.DistanceVectorRouting {
+type NeighborResult struct {
+	Neighbor     *protobuf.Interface
+	Time         time.Duration
+	RoutingTable *protobuf.DistanceVectorRouting
+}
+
+func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.NeighborsConnectionsMap) *distancevectorrouting.DistanceVectorRouting {
 
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
@@ -23,12 +29,6 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 		Target:    "",
 	}
 	msg.Length = int32(proto.Size(&msg))
-
-	type NeighborResult struct {
-		Neighbor     *protobuf.Interface
-		Time         time.Duration
-		RoutingTable *protobuf.DistanceVectorRouting
-	}
 
 	var wg sync.WaitGroup
 	results := make(chan *NeighborResult, len(nbl.content))
@@ -42,13 +42,12 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			nb := distancevectorrouting.Interface{Interface: neighbor}
 			fmt.Printf("Pinging %s\n", nb.ToString())
 
-			// Start a new QUIC stream
-			stream, conn, err := config.StartStream(nb.ToString())
+			// Start a new QUIC connection and stream if it doesn't exist already
+			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
 			if err != nil {
 				log.Printf("Error starting stream to %s: %v\n", nb.ToString(), err)
 				return
 			}
-			defer config.CloseStream(stream)
 
 			msg.Target = nb.ToString()
 			msg.Timestamp = int32(time.Now().UnixMilli())
@@ -117,45 +116,10 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 		nbl.RemoveAll()
 	}
 
-	// Process results from the channel
-	routingTables := make([]distancevectorrouting.DistanceVectorRouting, 0)
-	distances := make([]distancevectorrouting.RequestRoutingDelay, 0)
-	for result := range results {
-		nbl.AddNeighbor(result.Neighbor, cnf)
-		dvr := distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: result.RoutingTable}
-
-		dvr.UpdateSource(distancevectorrouting.Interface{Interface: result.Neighbor})
-		routingTables = append(routingTables, dvr)
-
-		distances = append(distances, distancevectorrouting.RequestRoutingDelay{
-			Neighbor: distancevectorrouting.Interface{Interface: result.Neighbor},
-			Delay:    int(result.Time),
-		})
-	}
-
-	// Also append itself to the routing table
-	tmp := map[string]*protobuf.NextHop{
-		cnf.NodeName: {
-			NextNode: cnf.NodeIP,
-			Distance: 0,
-		},
-	}
-	myTable := distancevectorrouting.DistanceVectorRouting{
-		Mutex: sync.Mutex{},
-		Dvr: &protobuf.DistanceVectorRouting{
-			Source:  cnf.NodeIP,
-			Entries: tmp,
-		},
-	}
-
-	routingTables = append(routingTables, myTable)
-	distances = append(distances, distancevectorrouting.RequestRoutingDelay{
-		Neighbor: distancevectorrouting.Interface{Interface: cnf.NodeIP},
-		Delay:    0,
-	})
+  dvtList, delayList := processResults(results, *cnf)
 
 	// Update the content of the routing table
-	return distancevectorrouting.NewRouting(cnf.NodeIP, routingTables, distances)
+	return distancevectorrouting.NewRouting(cnf.NodeIP, dvtList, delayList)
 }
 
 func (n *NeighborList) AddNeighbor(neighbor *protobuf.Interface, cnf *config.AppConfigList) {
@@ -198,4 +162,58 @@ func (n *NeighborList) HasNeighbor(neighbor *protobuf.Interface) bool {
 		}
 	}
 	return false
+}
+
+func processResults(results chan *NeighborResult, cnf config.AppConfigList) ([]distancevectorrouting.DistanceVectorRouting, []distancevectorrouting.RequestRoutingDelay) {
+	var (
+		routingTables []distancevectorrouting.DistanceVectorRouting
+		distances     []distancevectorrouting.RequestRoutingDelay
+	)
+
+	for result := range results {
+		addResult(&routingTables, &distances, *result, cnf)
+	}
+
+	// Append the node's own routing information
+	appendSelf(&routingTables, &distances, cnf)
+
+	return routingTables, distances
+}
+
+// addResult adds a single result to the routing tables and distances.
+func addResult(routingTables *[]distancevectorrouting.DistanceVectorRouting, distances *[]distancevectorrouting.RequestRoutingDelay, result NeighborResult, cnf config.AppConfigList) {
+	dvr := distancevectorrouting.DistanceVectorRouting{
+		Mutex: sync.Mutex{},
+		Dvr:   result.RoutingTable,
+	}
+
+	dvr.UpdateSource(distancevectorrouting.Interface{Interface: result.Neighbor})
+
+	// single threaded
+	*routingTables = append(*routingTables, dvr)
+
+	*distances = append(*distances, distancevectorrouting.RequestRoutingDelay{
+		Neighbor: distancevectorrouting.Interface{Interface: result.Neighbor},
+		Delay:    int(result.Time),
+	})
+}
+
+// appendSelf appends the routing table of the node itself.
+func appendSelf(routingTables *[]distancevectorrouting.DistanceVectorRouting, distances *[]distancevectorrouting.RequestRoutingDelay, cnf config.AppConfigList) {
+	myTable := distancevectorrouting.DistanceVectorRouting{
+		Mutex: sync.Mutex{},
+		Dvr: &protobuf.DistanceVectorRouting{
+			Source: cnf.NodeIP,
+			Entries: map[string]*protobuf.NextHop{
+				cnf.NodeName: {NextNode: cnf.NodeIP, Distance: 0},
+			},
+		},
+	}
+
+	// single threaded
+	*routingTables = append(*routingTables, myTable)
+	*distances = append(*distances, distancevectorrouting.RequestRoutingDelay{
+		Neighbor: distancevectorrouting.Interface{Interface: cnf.NodeIP},
+		Delay:    0,
+	})
 }
