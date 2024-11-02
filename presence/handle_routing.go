@@ -1,17 +1,18 @@
 package presence
 
 import (
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
-	distancevectorrouting "github.com/rodrigo0345/esr-tp2/presence/distance_vector_routing"
+	dvrouting "github.com/rodrigo0345/esr-tp2/presence/distance_vector_routing"
 	"google.golang.org/protobuf/proto"
 )
 
-func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.Stream, nl *NeighborList, dvr *distancevectorrouting.DistanceVectorRouting, otherDvr *distancevectorrouting.DistanceVectorRouting, timeTook int32) {
+func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.Stream, nl *NeighborList, dvr *dvrouting.DistanceVectorRouting, otherDvr *dvrouting.DistanceVectorRouting, timeTook int32) {
 
 	// the source needs to be updated only when sending the routing table
 	remote := conn.RemoteAddr().String()
@@ -31,7 +32,17 @@ func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.
 	local := conn.LocalAddr().String()
 	in := config.ToInterface(local)
 	in.Port = cnf.NodeIP.Port
-	msg.Sender = in.String()
+
+	msg.Sender = fmt.Sprintf("%v:%v", in.Ip, in.Port)
+
+	rm := config.ToInterface(remote)
+	remoteIp := rm.Ip
+  remotePort := otherDvr.Dvr.Source.Port
+
+	otherDvr.UpdateSource(dvrouting.Interface{Interface: &protobuf.Interface{
+		Ip:   remoteIp,
+		Port: remotePort,
+	}})
 
 	data, err := proto.Marshal(&msg)
 	if err != nil {
@@ -45,9 +56,8 @@ func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.
 		return
 	}
 
-	in = config.ToInterface(remote)
 	in.Port = otherDvr.Dvr.Source.Port
 
-  dvr.WeakUpdate(cnf, otherDvr, timeTook)
+	dvr.WeakUpdate(cnf, otherDvr, timeTook)
 	nl.AddNeighbor(in, cnf)
 }

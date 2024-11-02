@@ -31,9 +31,15 @@ func commandParser(command []string) (*config.AppConfigList, error) {
 
 	switch command[0] {
 	case "server":
+		nodeIP := config.ToInterface(*specificIP)
+		var neighborList []*protobuf.Interface
+		if *neighbors != "" {
+			neighborList = parseNeighbors(*neighbors)
+		}
 		config := config.AppConfigList{
-			Topology: config.Server,
-			VideoUrl: &command[1],
+			Topology:  config.Server,
+			NodeIP:    nodeIP,
+			Neighbors: neighborList,
 		}
 		return &config, nil
 	case "presence":
@@ -50,9 +56,15 @@ func commandParser(command []string) (*config.AppConfigList, error) {
 		}
 		return &config, nil
 	case "client":
+		nodeIP := config.ToInterface(*specificIP)
+		var neighborList []*protobuf.Interface
+		if *neighbors != "" {
+			neighborList = parseNeighbors(*neighbors)
+		}
 		config := config.AppConfigList{
-			Topology: config.Client,
-			VideoUrl: &command[1],
+			Topology:  config.Client,
+			NodeIP:    nodeIP,
+			Neighbors: neighborList,
 		}
 		return &config, nil
 	default:
@@ -112,4 +124,3 @@ func main() {
 		client.Client(instConfig)
 	}
 }
-

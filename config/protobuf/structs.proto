@@ -21,6 +21,7 @@ message Header {
     DistanceVectorRouting distance_vector_routing = 8;
   }
 
+  string client_ip = 9;
 }
 
 enum RequestType {
@@ -32,7 +33,10 @@ enum RequestType {
 // Client to Server
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-message ClientCommand { PlayerCommand command = 1; }
+message ClientCommand {
+  PlayerCommand command = 1;
+  string AdditionalInformation = 2;
+}
 
 enum PlayerCommand {
   PLAY = 0;

@@ -3,6 +3,7 @@ package presence
 import (
 	"fmt"
 	"log"
+	"math"
 	_ "net"
 	"sync"
 	"time"
@@ -19,7 +20,7 @@ type NeighborResult struct {
 	RoutingTable *protobuf.DistanceVectorRouting
 }
 
-func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.NeighborsConnectionsMap) *distancevectorrouting.DistanceVectorRouting {
+func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.ConnectionPool) *distancevectorrouting.DistanceVectorRouting {
 
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
@@ -31,36 +32,37 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 	msg.Length = int32(proto.Size(&msg))
 
 	var wg sync.WaitGroup
-	results := make(chan *NeighborResult, len(nbl.content))
+	results := make(chan *NeighborResult, len(nbl.Content))
 
-	for i := range nbl.content {
-		neighbor := nbl.content[i]
+	for i := range nbl.Content {
+		neighbor := nbl.Content[i]
 		wg.Add(1)
 		go func(neighbor *protobuf.Interface) {
 			defer wg.Done()
 
 			nb := distancevectorrouting.Interface{Interface: neighbor}
-			fmt.Printf("Pinging %s\n", nb.ToString())
 
 			// Start a new QUIC connection and stream if it doesn't exist already
 			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
 			if err != nil {
 				log.Printf("Error starting stream to %s: %v\n", nb.ToString(), err)
+				r, err := markNeighborAsDisconnected(dvr, nb)
+				if err != nil {
+					return
+				}
+				results <- r
 				return
 			}
 
 			msg.Target = nb.ToString()
 			msg.Timestamp = int32(time.Now().UnixMilli())
 			dvr.UpdateSource(distancevectorrouting.Interface{Interface: &protobuf.Interface{
-				Ip:   cnf.NodeIP.String(),
+				Ip:   cnf.NodeIP.Ip,
 				Port: cnf.NodeIP.Port,
 			}})
 			msg.Content = &protobuf.Header_DistanceVectorRouting{
 				DistanceVectorRouting: dvr.Dvr,
 			}
-
-			fmt.Println("Sending ping to", nb.ToString())
-			fmt.Println("Sender is", msg.Sender)
 
 			data, err := proto.Marshal(&msg)
 			if err != nil {
@@ -70,12 +72,22 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 
 			if err := config.SendMessage(stream, data); err != nil {
 				log.Printf("Error sending ping to %s: %v\n", nb.ToString(), err)
+				r, err := markNeighborAsDisconnected(dvr, nb)
+				if err != nil {
+					return
+				}
+				results <- r
 				return
 			}
 
 			responseData, err := config.ReceiveMessage(stream)
 			if err != nil {
 				log.Printf("Error receiving message from %s: %v\n", nb.ToString(), err)
+				r, err := markNeighborAsDisconnected(dvr, nb)
+				if err != nil {
+					return
+				}
+				results <- r
 				return
 			}
 
@@ -112,14 +124,40 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 	close(results)
 
 	// update the neighbor list
-	if len(nbl.content) > 1 {
-		nbl.RemoveAll()
-	}
+	// if len(nbl.content) > 1 {
+	// 	nbl.RemoveAll()
+	// }
 
-  dvtList, delayList := processResults(results, *cnf)
+	dvtList, delayList := processResults(results, *cnf)
 
 	// Update the content of the routing table
 	return distancevectorrouting.NewRouting(cnf.NodeIP, dvtList, delayList)
+}
+
+func markNeighborAsDisconnected(dvr *distancevectorrouting.DistanceVectorRouting, nb distancevectorrouting.Interface) (*NeighborResult, error) {
+	// search the dvr values for the neighborIp
+	neighborName, err := dvr.GetName(&protobuf.Interface{Ip: nb.Ip, Port: nb.Port})
+	neighborIp, err := dvr.GetNextHop(neighborName)
+	if err != nil {
+		return nil, err
+	}
+	nbIP := neighborIp.NextNode
+	if err != nil {
+		return nil, err
+	}
+
+	table := &protobuf.DistanceVectorRouting{
+		Entries: make(map[string]*protobuf.NextHop),
+		Source:  nbIP,
+	}
+
+	table.Entries[neighborName] = &protobuf.NextHop{NextNode: nbIP, Distance: math.MaxInt32}
+
+	return &NeighborResult{
+		Neighbor:     nbIP,
+		Time:         time.Duration(int32(math.MaxInt32)),
+		RoutingTable: table,
+	}, nil
 }
 
 func (n *NeighborList) AddNeighbor(neighbor *protobuf.Interface, cnf *config.AppConfigList) {
@@ -133,21 +171,21 @@ func (n *NeighborList) AddNeighbor(neighbor *protobuf.Interface, cnf *config.App
 	if neighbor.Ip == cnf.NodeIP.Ip && neighbor.Port == cnf.NodeIP.Port {
 		return
 	}
-	n.content = append(n.content, neighbor)
+	n.Content = append(n.Content, neighbor)
 }
 
 func (n *NeighborList) RemoveAll() {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
-	n.content = make([]*protobuf.Interface, 0)
+	n.Content = make([]*protobuf.Interface, 0)
 }
 
 func (nl *NeighborList) RemoveNeighbor(neighbor *protobuf.Interface) {
 	nl.mutex.Lock()
 	defer nl.mutex.Unlock()
-	for i, n := range nl.content {
+	for i, n := range nl.Content {
 		if n == neighbor {
-			nl.content = append(nl.content[:i], nl.content[i+1:]...)
+			nl.Content = append(nl.Content[:i], nl.Content[i+1:]...)
 			break
 		}
 	}
@@ -155,7 +193,7 @@ func (nl *NeighborList) RemoveNeighbor(neighbor *protobuf.Interface) {
 
 func (n *NeighborList) HasNeighbor(neighbor *protobuf.Interface) bool {
 	neighbor_i := distancevectorrouting.Interface{Interface: neighbor}
-	for _, nb := range n.content {
+	for _, nb := range n.Content {
 		nb_i := distancevectorrouting.Interface{Interface: nb}
 		if nb_i.ToString() == neighbor_i.ToString() {
 			return true

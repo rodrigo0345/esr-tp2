@@ -1,91 +1,92 @@
 package client
 
 import (
-	"context"
-	"crypto/tls"
-	"encoding/binary"
-	"io"
+	"bufio"
+	"fmt"
 	"log"
+	"net"
 	"os"
 	"time"
 
-	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf" // Import your generated protobuf package
 	"google.golang.org/protobuf/proto"
 )
 
 func Client(config *config.AppConfigList) {
-	// Create a context for the connection
-	ctx := context.Background()
+	// Address to send messages
+	presenceNetworkEntrypointIp := config.Neighbors[0]
+  pneIpString := fmt.Sprintf("%s:%d", presenceNetworkEntrypointIp.Ip, presenceNetworkEntrypointIp.Port)
+  fmt.Println(pneIpString)
 
-	// Dial the QUIC server with the proper signature
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // Skip verification for testing purposes
-		NextProtos:         []string{"quic-echo-example"},
-	}
-	quicConfig := &quic.Config{} // You can configure QUIC settings here, or leave it nil
+  listenIp := "127.0.0.1:2222"
 
-	// Dial the QUIC server
-	session, err := quic.DialAddr(ctx, "localhost:4242", tlsConfig, quicConfig)
+	// Setup a UDP connection for sending
+	conn, err := net.Dial("udp", pneIpString)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to dial: %v", err)
 	}
+	defer conn.Close()
 
-	// Open a stream to send and receive data
-	stream, err := session.OpenStreamSync(ctx)
+	// Create a UDP listener for incoming messages
+	laddr := net.UDPAddr{
+		Port: 2222, // Let the OS assign a port
+		IP:   net.ParseIP(listenIp),
+	}
+	listener, err := net.ListenUDP("udp", &laddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to clone UDP listener: %v", err)
 	}
+	defer listener.Close()
 
-	// Open the video file
-	videoFile, err := os.Open("videos/lol.Mjpeg")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer videoFile.Close()
-
-	// Create a buffer to hold chunks of the video
-	buffer := make([]byte, 1024)            // Adjust chunk size as necessary
-	sequenceNumber := 1                     // Initialize sequence number
-	videoFormat := protobuf.VideoFormat_MP4 // Set the video format (adjust accordingly)
-
-	for {
-		n, err := videoFile.Read(buffer)
-		if err != nil && err != io.EOF {
-			log.Fatal(err)
+	// Run a goroutine to listen for incoming messages
+	go func() {
+		for {
+			buffer := make([]byte, 1024)
+			n, addr, err := listener.ReadFromUDP(buffer)
+			if err != nil {
+				log.Printf("Error receiving message: %v", err)
+				continue
+			}
+			log.Printf("Received message from %v: %v", addr, string(buffer[:n]))
 		}
-		if n == 0 {
+	}()
+
+	// Read messages from the terminal and send
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println("Enter messages to send. Type 'exit' to quit.")
+	for {
+		fmt.Print("Message: ")
+		scanner.Scan()
+		text := scanner.Text()
+		if text == "exit" {
 			break
 		}
 
-		videoChunk := &protobuf.ServerVideoChunk{
-			SequenceNumber: int32(sequenceNumber),
-			Timestamp:      time.Now().UnixMilli(),
-			Format:         videoFormat,
-			Data:           buffer[:n],
-			IsLastChunk:    false,
+		message := protobuf.Header{
+			Type:      protobuf.RequestType_RETRANSMIT,
+			Length:    0,
+			Timestamp: int32(time.Now().UnixMilli()),
+			Sender:    "client",
+			Target:    "server",
+			Content: &protobuf.Header_ClientCommand{
+        ClientCommand: &protobuf.ClientCommand{
+          Command: protobuf.PlayerCommand_PLAY,
+          AdditionalInformation: text,
+        },
+			},
 		}
 
-		serializedChunk, err := proto.Marshal(videoChunk)
+		message.Length = int32(proto.Size(&message))
+		data, err := proto.Marshal(&message)
 		if err != nil {
-			log.Fatal("Failed to serialize chunk:", err)
+			log.Printf("Error marshaling message: %v", err)
+			continue
 		}
 
-		// Send the length of the message first
-		lengthPrefix := make([]byte, 4)
-		binary.BigEndian.PutUint32(lengthPrefix, uint32(len(serializedChunk)))
-
-		// Send the length prefix followed by the serialized chunk
-		_, err = stream.Write(lengthPrefix)
+		_, err = conn.Write(data)
 		if err != nil {
-			log.Fatal("Failed to send length prefix:", err)
+			log.Printf("Failed to send message: %v", err)
 		}
-		_, err = stream.Write(serializedChunk)
-		if err != nil {
-			log.Fatal("Failed to send chunk:", err)
-		}
-
-		sequenceNumber++
 	}
 }

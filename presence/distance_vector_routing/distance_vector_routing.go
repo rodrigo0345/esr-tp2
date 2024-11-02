@@ -2,10 +2,10 @@ package distancevectorrouting
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
@@ -23,16 +23,16 @@ func (rt Interface) ToString() string {
 // contains the best next node to reach the target
 // this is a wrapper around the protobuf DistanceVectorRouting
 type DistanceVectorRouting struct {
-  Mutex sync.Mutex
-	Dvr *protobuf.DistanceVectorRouting
+	Mutex sync.Mutex
+	Dvr   *protobuf.DistanceVectorRouting
 }
 
 func (dvr *DistanceVectorRouting) Lock() {
-  dvr.Mutex.Lock()
+	dvr.Mutex.Lock()
 }
 
 func (dvr *DistanceVectorRouting) Unlock() {
-  dvr.Mutex.Unlock()
+	dvr.Mutex.Unlock()
 }
 
 // make a path to itself
@@ -48,7 +48,7 @@ func CreateDistanceVectorRouting(cnfg *config.AppConfigList) *DistanceVectorRout
 		NextNode: thisAddress.Interface,
 		Distance: 0,
 	}
-  return &DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: dvr}
+	return &DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: dvr}
 }
 
 type NeighborRouting struct {
@@ -61,13 +61,12 @@ type RequestRoutingDelay struct {
 	Delay    int
 }
 
-
 func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVectorRouting, requestRoutingDelay []RequestRoutingDelay) *DistanceVectorRouting {
 
 	// Create a new DistanceVectorRouting instance to hold the combined routing table
 	newRoutingTable := &DistanceVectorRouting{
-    Mutex: sync.Mutex{},
-    Dvr: &protobuf.DistanceVectorRouting{
+		Mutex: sync.Mutex{},
+		Dvr: &protobuf.DistanceVectorRouting{
 			Source:  myIP,
 			Entries: make(map[string]*protobuf.NextHop),
 		},
@@ -87,13 +86,18 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 
 		for dest, nextHop := range neighborTable.Dvr.Entries {
 
-      if dest == myIP.String(){
+			if dest == myIP.String() {
 				newRoutingTable.Dvr.Entries[dest] = &protobuf.NextHop{
 					NextNode: myIP, // Use the neighborID as the next node
 					Distance: 0,
 				}
-      }
-			newDistance := nextHop.Distance + int32(neighborDelay/100)
+			}
+
+			var newDistance int32 = math.MaxInt32
+			fmt.Printf("NextHop.Distance: %d for %s\n", nextHop.Distance, dest)
+			if nextHop.Distance != math.MaxInt32 {
+				newDistance = nextHop.Distance + int32(neighborDelay/1000)
+			}
 
 			existingNextHop, found := newRoutingTable.Dvr.Entries[dest]
 
@@ -111,10 +115,8 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 }
 
 func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *DistanceVectorRouting, timeTook int32) {
-  dvr.Lock()
-  defer dvr.Unlock()
-
-	L := time.Since(time.UnixMilli(int64(timeTook)))
+	dvr.Lock()
+	defer dvr.Unlock()
 
 	for dest, nextHop := range other.Dvr.Entries {
 		// Skip updating if the destination is this node
@@ -123,7 +125,10 @@ func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *D
 		}
 
 		// Calculate the new distance considering the time delay
-		newDistance := nextHop.Distance + int32(L)
+		var newDistance int32 = math.MaxInt32
+		if newDistance != math.MaxInt32 {
+			newDistance = int32(nextHop.Distance + (timeTook / 1000))
+		}
 
 		// Retrieve the current data in our routing table for this destination
 		currentData, found := dvr.Dvr.Entries[dest]
@@ -131,10 +136,10 @@ func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *D
 		// Update if:
 		// - The destination is not found (new route)
 		// - The new route through the neighbor is shorter
-		if !found || newDistance < currentData.Distance {
+		if !found || int32(newDistance) < int32(currentData.Distance) {
 			dvr.Dvr.Entries[dest] = &protobuf.NextHop{
 				NextNode: other.Dvr.Source,
-				Distance: newDistance,
+				Distance: int32(newDistance),
 			}
 		}
 	}
@@ -163,6 +168,17 @@ func (dvr *DistanceVectorRouting) GetNextHop(dest string) (*protobuf.NextHop, er
 		return nil, fmt.Errorf("Destination %s not found", dest)
 	}
 	return nextHop, nil
+}
+
+func (dvr *DistanceVectorRouting) GetName(ip *protobuf.Interface) (string, error) {
+	for key, nextHop := range dvr.Dvr.Entries {
+		if nextHop.NextNode.String() != ip.String() {
+			continue
+		}
+		return key, nil
+	}
+
+	return "", nil
 }
 
 func (dvr *DistanceVectorRouting) Marshal() ([]byte, error) {

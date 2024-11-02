@@ -19,8 +19,8 @@ func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 	}
 
 	connection, err := quic.DialAddr(context.Background(), address, tlsConfig, &quic.Config{
-    KeepAlivePeriod: 60 * time.Second,
-  })
+		KeepAlivePeriod: 10 * time.Second,
+	})
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to dial: %w", err)
@@ -36,25 +36,34 @@ func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 }
 
 func CreateStream(conn quic.Connection) (quic.Stream, error) {
-  stream, err := conn.OpenStreamSync(context.Background())
-  if err != nil {
-    return nil, fmt.Errorf("failed to open stream: %w", err)
-  }
-  return stream, nil
+	stream, err := conn.OpenStreamSync(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open stream: %w", err)
+	}
+	return stream, nil
 }
 
 func CloseStream(stream quic.Stream) {
+	if stream == nil {
+		return
+	}
 	if err := stream.Close(); err != nil {
 		log.Printf("Failed to close stream: %v", err)
 	}
 }
 
+func CloseConnection(conn quic.Connection) {
+	if err := conn.CloseWithError(0, "closing connection"); err != nil {
+		fmt.Println("Failed to close connection:", err)
+	}
+}
+
 func IsConnectionOpen(stream quic.Stream) bool {
-    _, err := stream.Write([]byte("ping"))
-    if err != nil {
-        return false
-    }
-    return true
+	_, err := stream.Write([]byte("ping"))
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 func SendMessage(stream quic.Stream, message []byte) error {
