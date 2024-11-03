@@ -12,6 +12,8 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+var timeout time.Duration = 400
+
 func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true, // for testing only, don't use in production
@@ -19,7 +21,7 @@ func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 	}
 
 	connection, err := quic.DialAddr(context.Background(), address, tlsConfig, &quic.Config{
-		KeepAlivePeriod: 10 * time.Second,
+		KeepAlivePeriod: timeout * time.Second,
 	})
 
 	if err != nil {
@@ -59,6 +61,9 @@ func CloseConnection(conn quic.Connection) {
 }
 
 func IsConnectionOpen(stream quic.Stream) bool {
+	if stream == nil {
+		return false
+	}
 	_, err := stream.Write([]byte("ping"))
 	if err != nil {
 		return false
@@ -68,8 +73,12 @@ func IsConnectionOpen(stream quic.Stream) bool {
 
 func SendMessage(stream quic.Stream, message []byte) error {
 	// Create a context with a 10-second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
 	defer cancel()
+
+	if stream == nil {
+		return fmt.Errorf("Sending data to a nil stream")
+	}
 
 	// Send the length of the message first
 	lengthPrefix := make([]byte, 4)
@@ -80,7 +89,7 @@ func SendMessage(stream quic.Stream, message []byte) error {
 	go func() {
 		_, err := stream.Write(lengthPrefix)
 		if err != nil {
-			log.Printf("Error writing length prefix: %v", err)
+			log.Printf("Error writing length prefix: %v\n", err)
 			writeDone <- err
 			return
 		}
@@ -101,9 +110,8 @@ func SendMessage(stream quic.Stream, message []byte) error {
 }
 
 func ReceiveMessage(stream quic.Stream) ([]byte, error) {
-	// Read the 4-byte length prefix with a 10-second timeout
 	lengthBuf := make([]byte, 4)
-	if err := readWithTimeout(stream, lengthBuf, 10*time.Second); err != nil {
+	if err := readWithTimeout(stream, lengthBuf, timeout*time.Second); err != nil {
 		return nil, fmt.Errorf("failed to read message length: %w", err)
 	}
 
@@ -112,9 +120,8 @@ func ReceiveMessage(stream quic.Stream) ([]byte, error) {
 		return nil, fmt.Errorf("invalid message length: %d", messageLength)
 	}
 
-	// Read the message based on the length with a 10-second timeout
 	buf := make([]byte, messageLength)
-	if err := readWithTimeout(stream, buf, 10*time.Second); err != nil {
+	if err := readWithTimeout(stream, buf, timeout*time.Second); err != nil {
 		return nil, fmt.Errorf("failed to read message: %w", err)
 	}
 

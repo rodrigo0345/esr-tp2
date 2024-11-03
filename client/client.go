@@ -16,10 +16,10 @@ import (
 func Client(config *config.AppConfigList) {
 	// Address to send messages
 	presenceNetworkEntrypointIp := config.Neighbors[0]
-  pneIpString := fmt.Sprintf("%s:%d", presenceNetworkEntrypointIp.Ip, presenceNetworkEntrypointIp.Port)
-  fmt.Println(pneIpString)
+	pneIpString := fmt.Sprintf("%s:%d", presenceNetworkEntrypointIp.Ip, presenceNetworkEntrypointIp.Port)
+	fmt.Println(pneIpString)
 
-  listenIp := "127.0.0.1:2222"
+	listenIp := "127.0.0.1:2222"
 
 	// Setup a UDP connection for sending
 	conn, err := net.Dial("udp", pneIpString)
@@ -43,12 +43,21 @@ func Client(config *config.AppConfigList) {
 	go func() {
 		for {
 			buffer := make([]byte, 1024)
-			n, addr, err := listener.ReadFromUDP(buffer)
+			n, _, err := listener.ReadFromUDP(buffer)
 			if err != nil {
-				log.Printf("Error receiving message: %v", err)
+				log.Printf("Error receiving message: %s\n", err)
 				continue
 			}
-			log.Printf("Received message from %v: %v", addr, string(buffer[:n]))
+
+      var msg protobuf.Header
+      err = proto.Unmarshal(buffer[:n], &msg)
+      if err != nil {
+        log.Printf("Error unmarshaling message: %s\n", err)
+        continue
+      }
+
+      // TODO: change all of this
+			log.Printf("Received message from %s: %s\n", msg.Sender, msg.Target)
 		}
 	}()
 
@@ -62,18 +71,25 @@ func Client(config *config.AppConfigList) {
 		if text == "exit" {
 			break
 		}
+		fmt.Print("Target: ")
+		scanner.Scan()
+		target := scanner.Text()
+		if text == "exit" {
+			break
+		}
 
 		message := protobuf.Header{
 			Type:      protobuf.RequestType_RETRANSMIT,
 			Length:    0,
 			Timestamp: int32(time.Now().UnixMilli()),
+			ClientIp:  listenIp, // this is where the client is waiting for the response
 			Sender:    "client",
-			Target:    "server",
+			Target:    target,
 			Content: &protobuf.Header_ClientCommand{
-        ClientCommand: &protobuf.ClientCommand{
-          Command: protobuf.PlayerCommand_PLAY,
-          AdditionalInformation: text,
-        },
+				ClientCommand: &protobuf.ClientCommand{
+					Command:               protobuf.PlayerCommand_PLAY,
+					AdditionalInformation: text,
+				},
 			},
 		}
 

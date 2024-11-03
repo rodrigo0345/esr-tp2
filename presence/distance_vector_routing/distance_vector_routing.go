@@ -94,7 +94,6 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 			}
 
 			var newDistance int32 = math.MaxInt32
-			fmt.Printf("NextHop.Distance: %d for %s\n", nextHop.Distance, dest)
 			if nextHop.Distance != math.MaxInt32 {
 				newDistance = nextHop.Distance + int32(neighborDelay/1000)
 			}

@@ -34,15 +34,15 @@ func Server(config *config.AppConfigList) {
 	go func() {
 		for {
 			routingTable = neighborList.PingNeighbors(config, routingTable, neighborsConnectionsMap)
-			routingTable.Print()
+			// routingTable.Print()
 			time.Sleep(time.Second * 6)
 		}
 	}()
 
-	listenAndServe(tls, int(config.NodeIP.Port), config, neighborList, routingTable)
+	listenAndServe(tls, int(config.NodeIP.Port), config, neighborList, routingTable, neighborsConnectionsMap)
 }
 
-func listenAndServe(tls *tls.Config, serverPort int, cnf *config.AppConfigList, nl *presence.NeighborList, rt *distancevectorrouting.DistanceVectorRouting) {
+func listenAndServe(tls *tls.Config, serverPort int, cnf *config.AppConfigList, nl *presence.NeighborList, rt *distancevectorrouting.DistanceVectorRouting, nm *distancevectorrouting.ConnectionPool) {
 	port := fmt.Sprintf(":%d", serverPort)
 	listener, err := quic.ListenAddr(port, tls, nil)
 	if err != nil {
@@ -59,60 +59,49 @@ func listenAndServe(tls *tls.Config, serverPort int, cnf *config.AppConfigList, 
 
 		// For each session, handle incoming streams
 		go func() {
-			for {
-				stream, err := session.AcceptStream(context.Background())
+			stream, err := session.AcceptStream(context.Background())
+			if err != nil {
+				log.Println("Failed to accept stream:", err)
+				return
+			}
+
+			go func(stream quic.Stream) {
+				msg, err := config.ReceiveMessage(stream)
 				if err != nil {
-					log.Println("Failed to accept stream:", err)
+					log.Println("Error receiving message:", err)
 					return
 				}
 
-				go func(stream quic.Stream) {
-					msg, err := config.ReceiveMessage(stream)
-					if err != nil {
-						log.Println("Error receiving message:", err)
-						return
+				// unmarshal protobuf
+				var msgProtobuf protobuf.Header
+				err = proto.Unmarshal(msg, &msgProtobuf)
+				if err != nil {
+					log.Println("Error unmarshal protobuf:", err)
+					return
+				}
+
+				switch msgProtobuf.Type {
+				case protobuf.RequestType_ROUTINGTABLE:
+					timeTook := int32(time.Since(time.UnixMilli(int64(msgProtobuf.Timestamp))))
+					otherDvr := &distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: msgProtobuf.GetDistanceVectorRouting()}
+					presence.HandleRouting(session, cnf, stream, nl, rt, otherDvr, timeTook)
+					break
+				case protobuf.RequestType_RETRANSMIT:
+					fmt.Printf("Received message %s\n", msgProtobuf.GetClientCommand().AdditionalInformation)
+					msgProtobuf.Target = msgProtobuf.Sender
+					msgProtobuf.Sender = cnf.NodeName
+
+					msgProtobuf.Content = &protobuf.Header_ServerVideoChunk{
+						ServerVideoChunk: &protobuf.ServerVideoChunk{
+							Data: []byte(msgProtobuf.GetClientCommand().AdditionalInformation + "Hi there"),
+						},
 					}
+					stream.Close()
 
-					// unmarshal protobuf
-					var msgProtobuf protobuf.Header
-					err = proto.Unmarshal(msg, &msgProtobuf)
-					if err != nil {
-						log.Println("Error unmarshal protobuf:", err)
-						return
-					}
+					presence.SendMessage(msgProtobuf.Target, cnf, nl, rt, &msgProtobuf, nm)
+				}
 
-					switch msgProtobuf.Type {
-					case protobuf.RequestType_ROUTINGTABLE:
-						timeTook := int32(time.Since(time.UnixMilli(int64(msgProtobuf.Timestamp))))
-						otherDvr := &distancevectorrouting.DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: msgProtobuf.GetDistanceVectorRouting()}
-						presence.HandleRouting(session, cnf, stream, nl, rt, otherDvr, timeTook)
-						break
-					case protobuf.RequestType_RETRANSMIT:
-						msgProtobuf.Target = msgProtobuf.Sender
-						msgProtobuf.Sender = cnf.NodeName
-
-						msgProtobuf.Content = &protobuf.Header_ServerVideoChunk{
-							ServerVideoChunk: &protobuf.ServerVideoChunk{
-								Data: []byte(msgProtobuf.GetClientCommand().AdditionalInformation + "Hi there"),
-							},
-						}
-
-						// send it back
-						data, err := proto.Marshal(&msgProtobuf)
-						if err != nil {
-							log.Println("Error marshal protobuf:", err)
-							break
-						}
-						err = config.SendMessage(stream, data)
-						if err != nil {
-							log.Println("Error sending message:", err)
-							break
-						}
-					}
-
-				}(stream)
-
-			}
+			}(stream)
 		}()
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	dvr "github.com/rodrigo0345/esr-tp2/presence/distance_vector_routing"
@@ -12,7 +11,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream quic.Stream, neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
+func SendMessage(target string, cnf *config.AppConfigList, neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
+	fmt.Printf("Sending message to %s, client ip: %s\n", target, data.ClientIp)
+	data.Sender = cnf.NodeName
+	data.Target = target
+	HandleRetransmit(neighborList, routingTable, data, neighborsConnectionsMap)
+}
+
+func HandleRetransmit(neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
 	target := data.GetTarget()
 	nextHop, err := routingTable.GetNextHop(target)
 
@@ -29,7 +35,8 @@ func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream
 	// propagate the message to the next neighbor
 	for {
 		var msg []byte
-		neighborStream, _, err := neighborsConnectionsMap.GetConnectionStream(neighbor.String())
+		neighborIp := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
+		neighborStream, _, err := neighborsConnectionsMap.GetConnectionStream(neighborIp)
 		defer config.CloseStream(neighborStream)
 
 		if err != nil {
@@ -40,14 +47,14 @@ func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream
 		msg, err = proto.Marshal(data)
 		err = config.SendMessage(neighborStream, msg)
 		if err != nil {
-			log.Printf("Error sending message: %v\n", err)
+			log.Printf("%v\n", err)
 			goto fail
 		}
 
 		// wait to get a confirmation from the other side
 		_, err = config.ReceiveMessage(neighborStream)
 		if err != nil {
-			log.Printf("Error receiving message: %v\n", err)
+			log.Printf("%v\n", err)
 			goto fail
 		}
 
@@ -55,11 +62,14 @@ func HandleRetransmit(session quic.Connection, cnf *config.AppConfigList, stream
 
 	fail:
 		// try with another neighbor
+		if len(neighborList.Content)-1 == nextNeighbor {
+			log.Printf("Not possible to send the message to %s\n", nextHop.String())
+			break
+		}
 		neighbor = neighborList.Content[nextNeighbor]
 		nextNeighbor++
 		continue
 	}
-
 }
 
 func HandleRetransmitFromClient(cnf *config.AppConfigList, neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
@@ -91,17 +101,15 @@ func HandleRetransmitFromClient(cnf *config.AppConfigList, neighborList *Neighbo
 			goto fail
 		}
 
+		if neighborStream == nil {
+			log.Printf("Error starting stream to %s: no connection found\n", nextHop.String())
+			goto fail
+		}
+
 		msg, err = proto.Marshal(data)
 		err = config.SendMessage(neighborStream, msg)
 		if err != nil {
 			log.Printf("Error sending message: %v\n", err)
-			goto fail
-		}
-
-		// wait to get a confirmation from the other side
-		_, err = config.ReceiveMessage(neighborStream)
-		if err != nil {
-			log.Printf("Error receiving message: %v\n", err)
 			goto fail
 		}
 

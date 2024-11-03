@@ -63,11 +63,12 @@ func (cl *ClientList) Add(client *protobuf.Interface) {
 }
 
 func (cl *ClientList) Has(clientIp string) bool {
+	clIP := config.ToInterface(clientIp)
 	cl.mutex.Lock()
 	defer cl.mutex.Unlock()
 
 	for _, c := range cl.Content {
-		if c.String() == clientIp {
+		if c.Ip == clIP.Ip && c.Port == clIP.Port {
 			return true
 		}
 	}
@@ -93,7 +94,7 @@ func Presence(config *config.AppConfigList) {
 	go func() {
 		for {
 			routingTable = neighborList.PingNeighbors(config, routingTable, neighborsConnectionsMap)
-			routingTable.Print()
+			// routingTable.Print()
 			time.Sleep(time.Second * 6)
 		}
 	}()
@@ -162,7 +163,7 @@ func MainListen(cnf *config.AppConfigList, neighborList *NeighborList, neighbors
 					return
 				}
 
-				HandleRetransmit(session, cnf, stream, neighborList, routingTable, chunk, neighborsConnectionsMap)
+				HandleRetransmit(neighborList, routingTable, chunk, neighborsConnectionsMap)
 			}
 		}(connection)
 	}
@@ -192,11 +193,6 @@ func ListenForClientsInUDP(cnf *config.AppConfigList, neighborList *NeighborList
 			continue
 		}
 
-		// add the client to the list
-		connectedClients.mutex.Lock()
-		connectedClients.Content = append(connectedClients.Content, config.ToInterface(remoteAddr.String()))
-		connectedClients.mutex.Unlock()
-
 		go func(data []byte, addr *net.UDPAddr) {
 			chunk := &protobuf.Header{}
 			err := proto.Unmarshal(data[:n], chunk)
@@ -205,14 +201,16 @@ func ListenForClientsInUDP(cnf *config.AppConfigList, neighborList *NeighborList
 				return
 			}
 
-      fmt.Printf("Received message from %v: %v\n", addr, string(data[:n]))
+			// add the client to the list
+			connectedClients.mutex.Lock()
+			connectedClients.Content = append(connectedClients.Content, config.ToInterface(chunk.ClientIp))
+			connectedClients.mutex.Unlock()
+
+			fmt.Printf("Received message from %v: %v\n", addr, string(data[:n]))
 
 			// Process the message based on its type
 			switch chunk.Type {
 			case protobuf.RequestType_RETRANSMIT:
-				// modify data to mark the clientIp
-				chunk.ClientIp = addr.String()
-
 				// modify data to set the sender to this node
 				chunk.Sender = cnf.NodeName
 

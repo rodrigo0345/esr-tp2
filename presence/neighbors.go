@@ -1,7 +1,6 @@
 package presence
 
 import (
-	"fmt"
 	"log"
 	"math"
 	_ "net"
@@ -30,6 +29,10 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 		Target:    "",
 	}
 	msg.Length = int32(proto.Size(&msg))
+	dvr.Dvr.Source = &protobuf.Interface{
+		Ip:   cnf.NodeIP.Ip,
+		Port: cnf.NodeIP.Port,
+	}
 
 	var wg sync.WaitGroup
 	results := make(chan *NeighborResult, len(nbl.Content))
@@ -56,10 +59,6 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 
 			msg.Target = nb.ToString()
 			msg.Timestamp = int32(time.Now().UnixMilli())
-			dvr.UpdateSource(distancevectorrouting.Interface{Interface: &protobuf.Interface{
-				Ip:   cnf.NodeIP.Ip,
-				Port: cnf.NodeIP.Port,
-			}})
 			msg.Content = &protobuf.Header_DistanceVectorRouting{
 				DistanceVectorRouting: dvr.Dvr,
 			}
@@ -98,7 +97,6 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			}
 
 			response.Sender = conn.RemoteAddr().String()
-			fmt.Println("Received response from", response.Sender)
 
 			if response.Type != protobuf.RequestType_ROUTINGTABLE {
 				log.Printf("Error: received response is not a routing table from %s", nb.ToString())
