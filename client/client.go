@@ -93,6 +93,7 @@ func Client(config *config.AppConfigList) {
 			},
 		}
 
+    fmt.Printf("Sending message: %s to %s\n", text, target)
 		message.Length = int32(proto.Size(&message))
 		data, err := proto.Marshal(&message)
 		if err != nil {

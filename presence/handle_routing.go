@@ -3,6 +3,7 @@ package presence
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -12,10 +13,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.Stream, nl *NeighborList, dvr *dvrouting.DistanceVectorRouting, otherDvr *dvrouting.DistanceVectorRouting, timeTook int32) {
-
+func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream, header *protobuf.Header) {
 	// the source needs to be updated only when sending the routing table
 	remote := conn.RemoteAddr().String()
+  receivedDvr := &dvrouting.DistanceVectorRouting{Mutex: sync.RWMutex{}, Dvr: header.GetDistanceVectorRouting()}
+	timeTook := int32(time.Since(time.UnixMilli(int64(header.Timestamp))))
 
 	// send our routing table back
 	msg := protobuf.Header{
@@ -24,22 +26,23 @@ func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.
 		Timestamp: int32(time.Now().UnixMilli()),
 
 		Content: &protobuf.Header_DistanceVectorRouting{
-			DistanceVectorRouting: dvr.Dvr,
+			DistanceVectorRouting: ps.RoutingTable.Dvr,
 		},
 	}
 	msg.Length = int32(proto.Size(&msg))
 
 	local := conn.LocalAddr().String()
 	in := config.ToInterface(local)
-	in.Port = cnf.NodeIP.Port
+	in.Port = ps.Config.NodeIP.Port
 
 	msg.Sender = fmt.Sprintf("%v:%v", in.Ip, in.Port)
 
 	rm := config.ToInterface(remote)
 	remoteIp := rm.Ip
-  remotePort := otherDvr.Dvr.Source.Port
+  remotePort := receivedDvr.Dvr.Source.Port
 
-	otherDvr.UpdateSource(dvrouting.Interface{Interface: &protobuf.Interface{
+  // update the source of the received dvr
+	receivedDvr.UpdateSource(dvrouting.Interface{Interface: &protobuf.Interface{
 		Ip:   remoteIp,
 		Port: remotePort,
 	}})
@@ -56,8 +59,8 @@ func HandleRouting(conn quic.Connection, cnf *config.AppConfigList, stream quic.
 		return
 	}
 
-	in.Port = otherDvr.Dvr.Source.Port
+	in.Port = receivedDvr.Dvr.Source.Port
 
-	dvr.WeakUpdate(cnf, otherDvr, timeTook)
-	nl.AddNeighbor(in, cnf)
+	ps.RoutingTable.WeakUpdate(ps.Config, receivedDvr, timeTook)
+	ps.NeighborList.AddNeighbor(in, ps.Config)
 }

@@ -23,7 +23,7 @@ func (rt Interface) ToString() string {
 // contains the best next node to reach the target
 // this is a wrapper around the protobuf DistanceVectorRouting
 type DistanceVectorRouting struct {
-	Mutex sync.Mutex
+	Mutex sync.RWMutex
 	Dvr   *protobuf.DistanceVectorRouting
 }
 
@@ -48,7 +48,7 @@ func CreateDistanceVectorRouting(cnfg *config.AppConfigList) *DistanceVectorRout
 		NextNode: thisAddress.Interface,
 		Distance: 0,
 	}
-	return &DistanceVectorRouting{Mutex: sync.Mutex{}, Dvr: dvr}
+	return &DistanceVectorRouting{Mutex: sync.RWMutex{}, Dvr: dvr}
 }
 
 type NeighborRouting struct {
@@ -65,7 +65,7 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 
 	// Create a new DistanceVectorRouting instance to hold the combined routing table
 	newRoutingTable := &DistanceVectorRouting{
-		Mutex: sync.Mutex{},
+		Mutex: sync.RWMutex{},
 		Dvr: &protobuf.DistanceVectorRouting{
 			Source:  myIP,
 			Entries: make(map[string]*protobuf.NextHop),
@@ -162,6 +162,14 @@ func (dvr *DistanceVectorRouting) UpdateLocalSource(nodeName string, realPort in
 }
 
 func (dvr *DistanceVectorRouting) GetNextHop(dest string) (*protobuf.NextHop, error) {
+  dvr.Mutex.RLock()
+  defer dvr.Mutex.RUnlock()
+
+  // for debugging print all available keys
+  for key := range dvr.Dvr.Entries {
+    fmt.Printf("Chave disponível: %s\n", key)
+  }
+
 	nextHop, found := dvr.Dvr.Entries[dest]
 	if !found {
 		return nil, fmt.Errorf("Destination %s not found", dest)

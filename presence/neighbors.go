@@ -219,7 +219,7 @@ func processResults(results chan *NeighborResult, cnf config.AppConfigList) ([]d
 // addResult adds a single result to the routing tables and distances.
 func addResult(routingTables *[]distancevectorrouting.DistanceVectorRouting, distances *[]distancevectorrouting.RequestRoutingDelay, result NeighborResult, cnf config.AppConfigList) {
 	dvr := distancevectorrouting.DistanceVectorRouting{
-		Mutex: sync.Mutex{},
+		Mutex: sync.RWMutex{},
 		Dvr:   result.RoutingTable,
 	}
 
@@ -237,7 +237,7 @@ func addResult(routingTables *[]distancevectorrouting.DistanceVectorRouting, dis
 // appendSelf appends the routing table of the node itself.
 func appendSelf(routingTables *[]distancevectorrouting.DistanceVectorRouting, distances *[]distancevectorrouting.RequestRoutingDelay, cnf config.AppConfigList) {
 	myTable := distancevectorrouting.DistanceVectorRouting{
-		Mutex: sync.Mutex{},
+		Mutex: sync.RWMutex{},
 		Dvr: &protobuf.DistanceVectorRouting{
 			Source: cnf.NodeIP,
 			Entries: map[string]*protobuf.NextHop{

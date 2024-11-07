@@ -2,28 +2,18 @@ package presence
 
 import (
 	"fmt"
-	"log"
-
+	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
-	dvr "github.com/rodrigo0345/esr-tp2/presence/distance_vector_routing"
-
-	"google.golang.org/protobuf/proto"
 )
 
-func SendMessage(target string, cnf *config.AppConfigList, neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
-	fmt.Printf("Sending message to %s, client ip: %s\n", target, data.ClientIp)
-	data.Sender = cnf.NodeName
-	data.Target = target
-	HandleRetransmit(neighborList, routingTable, data, neighborsConnectionsMap)
-}
 
-func HandleRetransmit(neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
-	target := data.GetTarget()
-	nextHop, err := routingTable.GetNextHop(target)
+func HandleRetransmit(ps *PresenceSystem, connection quic.Connection, stream quic.Stream, header *protobuf.Header) {
+	target := header.GetTarget()
 
+	nextHop, err := ps.RoutingTable.GetNextHop(target)
 	if err != nil {
-		log.Printf("No next hop found: %v\n", err)
+    ps.Logger.Error(err.Error())
 		return
 	}
 
@@ -36,25 +26,26 @@ func HandleRetransmit(neighborList *NeighborList, routingTable *dvr.DistanceVect
 	for {
 		var msg []byte
 		neighborIp := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
-		neighborStream, _, err := neighborsConnectionsMap.GetConnectionStream(neighborIp)
+		neighborStream, _, err := ps.ConnectionPool.GetConnectionStream(neighborIp)
 		defer config.CloseStream(neighborStream)
 
 		if err != nil {
-			log.Printf("Error starting stream to %s: %v\n", nextHop.String(), err)
+      ps.Logger.Error(err.Error())
 			goto fail
 		}
 
-		msg, err = proto.Marshal(data)
+    msg, err = config.MarshalHeader(header)
 		err = config.SendMessage(neighborStream, msg)
+
 		if err != nil {
-			log.Printf("%v\n", err)
+      ps.Logger.Error(err.Error())
 			goto fail
 		}
 
 		// wait to get a confirmation from the other side
 		_, err = config.ReceiveMessage(neighborStream)
 		if err != nil {
-			log.Printf("%v\n", err)
+      ps.Logger.Error(err.Error())
 			goto fail
 		}
 
@@ -62,29 +53,29 @@ func HandleRetransmit(neighborList *NeighborList, routingTable *dvr.DistanceVect
 
 	fail:
 		// try with another neighbor
-		if len(neighborList.Content)-1 == nextNeighbor {
-			log.Printf("Not possible to send the message to %s\n", nextHop.String())
+		if len(ps.NeighborList.Content)-1 == nextNeighbor {
+      ps.Logger.Error("No more neighbors to send the message")
 			break
 		}
-		neighbor = neighborList.Content[nextNeighbor]
+		neighbor = ps.NeighborList.Content[nextNeighbor]
 		nextNeighbor++
 		continue
 	}
 }
 
-func HandleRetransmitFromClient(cnf *config.AppConfigList, neighborList *NeighborList, routingTable *dvr.DistanceVectorRouting, data *protobuf.Header, neighborsConnectionsMap *dvr.ConnectionPool) {
-	target := data.GetTarget()
-	nextHop, err := routingTable.GetNextHop(target)
+func HandleRetransmitFromClient(ps *PresenceSystem, header *protobuf.Header) {
+	target := header.GetTarget()
+	nextHop, err := ps.RoutingTable.GetNextHop(target)
 
 	if err != nil {
-		log.Printf("Error getting next hop: %v\n", err)
+    ps.Logger.Error(err.Error())
 		return
 	}
 
 	// open a connection with nextHop and try to send the message
 	// if it fails, send to another neighbor, and remove it from the list
 	neighbor := nextHop.NextNode
-	fmt.Printf("Next hop: %v\n", nextHop.NextNode)
+  ps.Logger.Info(fmt.Sprintf("Next hop: %v\n", nextHop.NextNode))
 	nextNeighbor := 0
 
 	// propagate the message to the next neighbor
@@ -92,24 +83,27 @@ func HandleRetransmitFromClient(cnf *config.AppConfigList, neighborList *Neighbo
 		var msg []byte
 
 		nIPString := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
-		fmt.Printf("Sending message to %s", nIPString)
-		neighborStream, _, err := neighborsConnectionsMap.GetConnectionStream(nIPString)
+
+    ps.Logger.Info(fmt.Sprintf("Sending message to %s\n", nIPString))
+
+		neighborStream, _, err := ps.ConnectionPool.GetConnectionStream(nIPString)
 		defer config.CloseStream(neighborStream)
 
 		if err != nil {
-			log.Printf("Error starting stream to %s: %v\n", nextHop.String(), err)
+      ps.Logger.Error(err.Error())
 			goto fail
 		}
 
 		if neighborStream == nil {
-			log.Printf("Error starting stream to %s: no connection found\n", nextHop.String())
+      ps.Logger.Error(fmt.Sprintf("Error starting stream to %s: no connection found\n", nextHop.String()))
 			goto fail
 		}
 
-		msg, err = proto.Marshal(data)
+    msg, err = config.MarshalHeader(header)
 		err = config.SendMessage(neighborStream, msg)
+
 		if err != nil {
-			log.Printf("Error sending message: %v\n", err)
+      ps.Logger.Error(err.Error())
 			goto fail
 		}
 
@@ -117,7 +111,7 @@ func HandleRetransmitFromClient(cnf *config.AppConfigList, neighborList *Neighbo
 
 	fail:
 		// try with another neighbor
-		neighbor = neighborList.Content[nextNeighbor]
+		neighbor = ps.NeighborList.Content[nextNeighbor]
 		nextNeighbor++
 		continue
 	}
