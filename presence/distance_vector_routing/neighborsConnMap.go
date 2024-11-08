@@ -62,7 +62,6 @@ func (nm *ConnectionPool) CreateNewConnection(neighborIp string) {
 }
 
 func (nm *ConnectionPool) GetConnectionStream(address string) (quic.Stream, quic.Connection, error) {
-
 	var stream quic.Stream
 	var conn quic.Connection
 	var err error

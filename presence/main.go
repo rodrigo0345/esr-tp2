@@ -8,13 +8,15 @@ import (
 
 func Presence(config *config.AppConfigList) {
 
-  presenceSystem := NewPresenceSystem(config)
+	presenceSystem := NewPresenceSystem(config)
 
-  go presenceSystem.HeartBeatNeighbors(5)
+	go presenceSystem.HeartBeatNeighbors(5)
 
-  presenceSystem.Logger.Info(fmt.Sprintf("Node is running on %s\n", presenceSystem.Config.NodeIP.String()))
+	// kill clients that dont ping in a while
+	go presenceSystem.HeartBeatClients(5)
 
-  go presenceSystem.ListenForClients()
-  presenceSystem.ListenForClientsInUDP()
+	presenceSystem.Logger.Info(fmt.Sprintf("Node is running on %s\n", presenceSystem.Config.NodeIP.String()))
+
+	go presenceSystem.ListenForClients()
+	presenceSystem.ListenForClientsInUDP()
 }
-

@@ -49,15 +49,20 @@ func Client(config *config.AppConfigList) {
 				continue
 			}
 
-      var msg protobuf.Header
-      err = proto.Unmarshal(buffer[:n], &msg)
-      if err != nil {
-        log.Printf("Error unmarshaling message: %s\n", err)
-        continue
-      }
+			var msg protobuf.Header
+			err = proto.Unmarshal(buffer[:n], &msg)
+			if err != nil {
+				log.Printf("Error unmarshaling message: %s\n", err)
+				continue
+			}
 
-      // TODO: change all of this
-			log.Printf("Received message from %s: %s\n", msg.Sender, msg.Target)
+			if msg.GetServerVideoChunk() == nil {
+				continue
+			}
+			videoData := string(msg.GetServerVideoChunk().Data)
+
+			// TODO: change all of this
+			log.Printf("%s: %s\n", videoData, msg.Sender)
 		}
 	}()
 
@@ -79,12 +84,13 @@ func Client(config *config.AppConfigList) {
 		}
 
 		message := protobuf.Header{
-			Type:      protobuf.RequestType_RETRANSMIT,
-			Length:    0,
-			Timestamp: int32(time.Now().UnixMilli()),
-			ClientIp:  listenIp, // this is where the client is waiting for the response
-			Sender:    "client",
-			Target:    target,
+			Type:           protobuf.RequestType_RETRANSMIT,
+			Length:         0,
+			Timestamp:      int32(time.Now().UnixMilli()),
+			ClientIp:       listenIp, // this is where the client is waiting for the response
+			Sender:         "client",
+			Target:         target,
+			RequestedVideo: "video",
 			Content: &protobuf.Header_ClientCommand{
 				ClientCommand: &protobuf.ClientCommand{
 					Command:               protobuf.PlayerCommand_PLAY,
@@ -93,7 +99,7 @@ func Client(config *config.AppConfigList) {
 			},
 		}
 
-    fmt.Printf("Sending message: %s to %s\n", text, target)
+		fmt.Printf("Sending message: %s to %s\n", text, target)
 		message.Length = int32(proto.Size(&message))
 		data, err := proto.Marshal(&message)
 		if err != nil {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
@@ -13,6 +14,7 @@ import (
 type ServerSystem struct {
 	PresenceSystem *presence.PresenceSystem
 	Logger         *config.Logger
+	VideoStreams   VideoStreams
 }
 
 func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
@@ -34,6 +36,7 @@ func (ss *ServerSystem) ListenForClients() {
 	listener, err := quic.ListenAddr(port, tls, nil)
 	if err != nil {
 		ss.Logger.Error(err.Error())
+		return
 	}
 
 	ss.Logger.Info(fmt.Sprintf("QUIC server is listening on port %d\n", ss.PresenceSystem.Config.NodeIP.Port))
@@ -76,21 +79,149 @@ func (ss *ServerSystem) ListenForClients() {
 					break
 				case protobuf.RequestType_RETRANSMIT:
 
+					// check if the message is for this server
+					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
+						ss.Logger.Error(fmt.Sprintf("Received message for %s, but this is %s\n", header.GetTarget(), ss.PresenceSystem.Config.NodeName))
+						ss.Logger.Info(fmt.Sprintf("Trying to retransmit to %s\n", header.GetTarget()))
+
+						presence.HandleRetransmitFromClient(ss.PresenceSystem, header)
+						return
+					}
+
 					ss.Logger.Info(fmt.Sprintf("Received message %s\n", header.GetClientCommand().AdditionalInformation))
+
+					// this specifies where the message needs to go
 					header.Target = header.Sender
 					header.Sender = ss.PresenceSystem.Config.NodeName
-
-					header.Content = &protobuf.Header_ServerVideoChunk{
-						ServerVideoChunk: &protobuf.ServerVideoChunk{
-							Data: []byte(header.GetClientCommand().AdditionalInformation + "Hi there"),
-						},
-					}
 					stream.Close()
 
-					presence.HandleRetransmit(ss.PresenceSystem, session, stream, header)
+					switch header.GetClientCommand().Command {
+					case protobuf.PlayerCommand_PLAY:
+						ss.StartVideoStream(header)
+						break
+					case protobuf.PlayerCommand_STOP:
+						ss.Logger.Info("Stopping video stream")
+						ss.StopVideoStream(header)
+						break
+					default:
+						ss.Logger.Error("Unknown command")
+						ss.StopVideoStream(header)
+						break
+					}
+
+					// TODO have another thread that for each video stream, streams
+					presence.HandleRetransmit(ss.PresenceSystem, header)
 				}
 
 			}(stream)
 		}()
+	}
+}
+
+func (ss *ServerSystem) StartVideoStream(header *protobuf.Header) {
+	videoChoice := header.RequestedVideo
+	clientName := header.GetTarget()
+	ss.Logger.Info(fmt.Sprintf("Starting video stream for %s, requesting %s\n", clientName, videoChoice))
+
+	client := Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
+
+	ss.VideoStreams.AddStream(videoChoice, client)
+}
+
+func (ss *ServerSystem) StopVideoStream(header *protobuf.Header) {
+	videoChoice := header.RequestedVideo
+	clientName := header.GetTarget()
+	ss.Logger.Info(fmt.Sprintf("Stopping video stream for %s, requesting %s\n", clientName, videoChoice))
+
+	client := Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
+	ss.VideoStreams.RemoveStream(videoChoice, client)
+}
+
+func (ss *ServerSystem) BackgroundStreaming() {
+	for {
+		for _, video := range ss.VideoStreams.Streams {
+
+			header := &protobuf.Header{
+				Sender: ss.PresenceSystem.Config.NodeName,
+				// to be defined
+				Target:         "",
+				RequestedVideo: video.Video,
+				Type:           protobuf.RequestType_RETRANSMIT,
+				// to be determined
+				Length:    0,
+				Timestamp: int32(time.Now().Unix()),
+				Content: &protobuf.Header_ServerVideoChunk{
+					ServerVideoChunk: &protobuf.ServerVideoChunk{
+						Data:           []byte(fmt.Sprintf("Sending video stream for %s", video.Video)),
+						SequenceNumber: 0,
+						Timestamp:      time.Now().Unix(),
+						Format:         protobuf.VideoFormat_MJPEG,
+						IsLastChunk:    false,
+					},
+				},
+			}
+
+			// TODO: stream video, for now just send a bunch of messages
+			for _, client := range video.Clients {
+
+				sqNumber := 0
+				for {
+					sqNumber += 1
+					header.Target = client.PresenceNodeName
+					header.ClientIp = client.ClientIP
+					header.Length = int32(len(header.Content.(*protobuf.Header_ServerVideoChunk).ServerVideoChunk.Data))
+					header.GetServerVideoChunk().SequenceNumber = int32(sqNumber)
+
+          ss.sendVideoChunk(header)
+				}
+			}
+
+		}
+	}
+}
+
+func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
+	target := header.GetTarget()
+
+	nextHop, err := ss.PresenceSystem.RoutingTable.GetNextHop(target)
+	if err != nil {
+    ss.Logger.Error(err.Error())
+		return
+	}
+
+	// open a connection with nextHop and be persistent trying to send the message
+	neighbor := nextHop.NextNode
+
+  failCount := 0
+  limitFails := 3 
+
+	for {
+		var msg []byte
+		neighborIp := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
+		neighborStream, _, err := ss.PresenceSystem.ConnectionPool.GetConnectionStream(neighborIp)
+		defer config.CloseStream(neighborStream)
+
+		if err != nil {
+      ss.Logger.Error(err.Error())
+			goto fail
+		}
+
+    msg, err = config.MarshalHeader(header)
+		err = config.SendMessage(neighborStream, msg)
+
+		if err != nil {
+      ss.Logger.Error(err.Error())
+			goto fail
+		}
+
+		break
+
+	fail:
+    failCount += 1
+    if failCount > limitFails {
+      ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s\n", neighborIp))
+			break
+    }
+		continue
 	}
 }

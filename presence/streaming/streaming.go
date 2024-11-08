@@ -28,7 +28,4 @@ func RedirectPacketToClient(data []byte, clientIp string) {
 		fmt.Println("Error sending data:", err)
 		return
 	}
-
-	fmt.Println("Data sent successfully")
-
 }

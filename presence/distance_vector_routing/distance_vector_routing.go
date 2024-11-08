@@ -162,13 +162,8 @@ func (dvr *DistanceVectorRouting) UpdateLocalSource(nodeName string, realPort in
 }
 
 func (dvr *DistanceVectorRouting) GetNextHop(dest string) (*protobuf.NextHop, error) {
-  dvr.Mutex.RLock()
-  defer dvr.Mutex.RUnlock()
-
-  // for debugging print all available keys
-  for key := range dvr.Dvr.Entries {
-    fmt.Printf("Chave disponível: %s\n", key)
-  }
+	dvr.Mutex.RLock()
+	defer dvr.Mutex.RUnlock()
 
 	nextHop, found := dvr.Dvr.Entries[dest]
 	if !found {
