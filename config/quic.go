@@ -12,7 +12,7 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-var timeout time.Duration = 400
+var timeout time.Duration = 5
 
 func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 	tlsConfig := &tls.Config{
@@ -20,9 +20,7 @@ func StartConnStream(address string) (quic.Stream, quic.Connection, error) {
 		NextProtos:         []string{"quic-echo-example"},
 	}
 
-	connection, err := quic.DialAddr(context.Background(), address, tlsConfig, &quic.Config{
-		KeepAlivePeriod: timeout * time.Second,
-	})
+	connection, err := quic.DialAddr(context.Background(), address, tlsConfig, nil)
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to dial: %w", err)
@@ -89,7 +87,6 @@ func SendMessage(stream quic.Stream, message []byte) error {
 	go func() {
 		_, err := stream.Write(lengthPrefix)
 		if err != nil {
-			log.Printf("Error writing length prefix: %v\n", err)
 			writeDone <- err
 			return
 		}
@@ -110,8 +107,17 @@ func SendMessage(stream quic.Stream, message []byte) error {
 }
 
 func ReceiveMessage(stream quic.Stream) ([]byte, error) {
+	if stream == nil {
+		return nil, fmt.Errorf("receive message from nil stream")
+	}
+
+	// Set read deadline
+	_, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+	defer cancel()
+
 	lengthBuf := make([]byte, 4)
-	if err := readWithTimeout(stream, lengthBuf, timeout*time.Second); err != nil {
+	// Read the length of the message
+	if _, err := io.ReadFull(stream, lengthBuf); err != nil {
 		return nil, fmt.Errorf("failed to read message length: %w", err)
 	}
 
@@ -121,29 +127,9 @@ func ReceiveMessage(stream quic.Stream) ([]byte, error) {
 	}
 
 	buf := make([]byte, messageLength)
-	if err := readWithTimeout(stream, buf, timeout*time.Second); err != nil {
+	if _, err := io.ReadFull(stream, buf); err != nil {
 		return nil, fmt.Errorf("failed to read message: %w", err)
 	}
 
 	return buf, nil
-}
-
-// readWithTimeout reads data from the stream with a timeout.
-func readWithTimeout(stream quic.Stream, buf []byte, timeout time.Duration) error {
-	readDone := make(chan error, 1)
-
-	go func() {
-		_, err := io.ReadFull(stream, buf)
-		readDone <- err
-	}()
-
-	select {
-	case err := <-readDone:
-		if err != nil {
-			return fmt.Errorf("read error: %w", err)
-		}
-		return nil
-	case <-time.After(timeout):
-		return fmt.Errorf("read operation timed out after %v", timeout)
-	}
 }

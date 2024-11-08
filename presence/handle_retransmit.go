@@ -45,13 +45,6 @@ func HandleRetransmit(ps *PresenceSystem, header *protobuf.Header) {
 			goto fail
 		}
 
-		// wait to get a confirmation from the other side
-		_, err = config.ReceiveMessage(neighborStream)
-		if err != nil {
-			ps.Logger.Error(err.Error())
-			goto fail
-		}
-
 		break
 
 	fail:

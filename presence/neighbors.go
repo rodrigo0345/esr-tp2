@@ -103,7 +103,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			}
 
 			routingTable := response.GetDistanceVectorRouting()
-			timeTook := time.UnixMilli(int64(response.Timestamp)).Sub(time.UnixMilli(int64(msg.Timestamp)))
+			timeTook := time.UnixMilli(response.Timestamp).Sub(time.UnixMilli(msg.Timestamp))
 
 			// Log successful response for debugging
 			// log.Printf("Received routing table from %s, time took: %v", nb.ToString(), timeTook)
@@ -148,7 +148,7 @@ func markNeighborAsDisconnected(dvr *distancevectorrouting.DistanceVectorRouting
 		Source:  nbIP,
 	}
 
-	table.Entries[neighborName] = &protobuf.NextHop{NextNode: nbIP, Distance: math.MaxInt32}
+	table.Entries[neighborName] = &protobuf.NextHop{NextNode: nbIP, Distance: math.MaxInt64}
 
 	return &NeighborResult{
 		Neighbor:     nbIP,

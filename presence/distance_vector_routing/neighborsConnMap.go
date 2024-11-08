@@ -9,13 +9,13 @@ import (
 )
 
 type ConnectionPool struct {
-	Mutex       sync.Mutex
+	Mutex       sync.RWMutex
 	Connections map[string]quic.Connection
 }
 
 func NewNeighborsConnectionsMap() *ConnectionPool {
 	return &ConnectionPool{
-		Mutex:       sync.Mutex{},
+		Mutex:       sync.RWMutex{},
 		Connections: make(map[string]quic.Connection),
 	}
 }
@@ -46,6 +46,7 @@ func (nm *ConnectionPool) Remove(neighborIp string) {
 	if nm.Connections == nil {
 		nm.Connections = make(map[string]quic.Connection)
 	}
+	nm.Connections[neighborIp] = nil
 
 	delete(nm.Connections, neighborIp)
 }
@@ -67,6 +68,7 @@ func (nm *ConnectionPool) GetConnectionStream(address string) (quic.Stream, quic
 	var err error
 	var ok bool = false
 
+	nm.Mutex.RLock()
 	if _, ok := nm.Connections[address]; ok {
 		conn := nm.Connections[address]
 		stream, _ = config.CreateStream(conn)
@@ -76,8 +78,8 @@ func (nm *ConnectionPool) GetConnectionStream(address string) (quic.Stream, quic
 			config.CloseStream(stream)
 			config.CloseConnection(conn)
 		}
-
 	}
+	nm.Mutex.RUnlock()
 
 	if !ok {
 		// create a new connection
