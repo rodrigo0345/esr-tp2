@@ -3,6 +3,7 @@ package presence
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"net"
 	"time"
 
@@ -58,17 +59,18 @@ func (ps *PresenceSystem) HeartBeatClients(seconds int) {
 			ps.CurrentStreams[video].RemoveDeadClients(seconds)
 
 			// if the list is empty, notify the server that it can stop streaming
-			if len(ps.CurrentStreams[video].Content) == 0 {
-				ps.Logger.Info(fmt.Sprintf("No clients are connected to %s\n", video))
+			if len(ps.CurrentStreams[video].Content) != 0 {
+				break
 			}
 
+			ps.Logger.Info(fmt.Sprintf("No clients are connected to %s\n", video))
 			delete(ps.CurrentStreams, video)
 
 			header := &protobuf.Header{
 				Type:           protobuf.RequestType_RETRANSMIT,
 				Length:         0,
-				Timestamp:      int32(time.Now().UnixMilli()),
-				ClientIp:       ps.Config.NodeIP.String(),
+				Timestamp:      time.Now().UnixMilli(),
+				ClientIp:       fmt.Sprintf("%s:%d", ps.Config.NodeIP.Ip, ps.Config.NodeIP.Port),
 				Sender:         ps.Config.NodeName,
 				Target:         "server", // TODO: change this and make it dynamic
 				RequestedVideo: video,
@@ -79,6 +81,7 @@ func (ps *PresenceSystem) HeartBeatClients(seconds int) {
 					},
 				},
 			}
+			header.Length = int32(proto.Size(header))
 
 			SendMessage(ps, header)
 		}
@@ -144,7 +147,7 @@ func (ps *PresenceSystem) ListenForClients() {
 						streaming.RedirectPacketToClient(data, fmt.Sprintf("%s:%d", client.Ip, client.Port))
 					}
 
-					return
+					break
 				}
 
 				HandleRetransmit(ps, header)

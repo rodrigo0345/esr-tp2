@@ -13,7 +13,7 @@ message Header {
   string target = 2;
   RequestType type = 3;
   int32 length = 4;
-  int32 timestamp = 5;
+  int64 timestamp = 5;
 
   oneof content {
     ClientCommand client_command = 6;
@@ -74,7 +74,7 @@ message Interface {
 
 message NextHop {
   Interface next_node = 1;
-  int32 distance = 2;
+  int64 distance = 2;
 }
 
 message DistanceVectorRouting {

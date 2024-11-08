@@ -20,7 +20,7 @@ func (cl *ClientList) Remove(client string) {
 	defer cl.mutex.Unlock()
 
 	for i, c := range cl.Content {
-		if c.String() == client {
+		if fmt.Sprintf("%s:%d", c.Ip, c.Port) == client {
 			cl.Content = append(cl.Content[:i], cl.Content[i+1:]...)
 			break
 		}
@@ -89,7 +89,8 @@ func (cl *ClientList) GetDeadClients(interval int) []*protobuf.Interface {
 	for _, client := range cl.Content {
 		key := cl.clientKey(client.Ip, int(client.Port))
 		if lastPing, exists := cl.LastPing[key]; exists {
-			if int(time.Now().Unix())-lastPing > interval {
+			secondsPassed := int(time.Now().Unix()) - lastPing
+			if secondsPassed > interval {
 				deadClients = append(deadClients, client)
 			}
 		} else {
@@ -102,8 +103,6 @@ func (cl *ClientList) GetDeadClients(interval int) []*protobuf.Interface {
 }
 
 func (cl *ClientList) RemoveDeadClients(interval int) {
-	cl.mutex.Lock()
-	defer cl.mutex.Unlock()
 
 	for _, client := range cl.GetDeadClients(interval) {
 		cl.Remove(cl.clientKey(client.Ip, int(client.Port)))

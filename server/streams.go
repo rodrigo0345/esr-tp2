@@ -3,6 +3,7 @@ package server
 import "sync"
 
 type Client struct {
+	mutex            sync.Mutex
 	PresenceNodeName string
 	ClientIP         string
 }
@@ -11,23 +12,23 @@ type Stream struct {
 	Video string
 
 	// list of clients that requested the video
-	Clients []Client
+	Clients []*Client
 }
 
 type VideoStreams struct {
 	mutex sync.Mutex
 	// map of video name to stream
-	Streams []Stream
+	Streams []*Stream
 }
 
 func NewVideoStreams() *VideoStreams {
 	return &VideoStreams{
-		Streams: []Stream{},
+		Streams: []*Stream{},
 	}
 }
 
 // add a new stream to the list
-func (vs *VideoStreams) AddStream(video string, client Client) {
+func (vs *VideoStreams) AddStream(video string, client *Client) {
 	vs.mutex.Lock()
 	defer vs.mutex.Unlock()
 
@@ -39,9 +40,9 @@ func (vs *VideoStreams) AddStream(video string, client Client) {
 			return
 		}
 	}
-	vs.Streams = append(vs.Streams, Stream{
+	vs.Streams = append(vs.Streams, &Stream{
 		Video: video,
-		Clients: []Client{
+		Clients: []*Client{
 			client,
 		},
 	})
@@ -56,11 +57,13 @@ func (vs *VideoStreams) RemoveStream(video string, client Client) {
 	for i, stream := range vs.Streams {
 		if stream.Video == video {
 			// Remove the client from the list
-			newClients := []Client{}
+			newClients := []*Client{}
 			for _, c := range vs.Streams[i].Clients {
 				if c.PresenceNodeName != client.PresenceNodeName {
 					newClients = append(newClients, c)
 				}
+				// clean c
+				c = nil
 			}
 			vs.Streams[i].Clients = newClients
 
@@ -68,6 +71,7 @@ func (vs *VideoStreams) RemoveStream(video string, client Client) {
 			if len(vs.Streams[i].Clients) == 0 {
 				// Remove the stream entirely if no clients are left
 				vs.Streams = append(vs.Streams[:i], vs.Streams[i+1:]...)
+				stream = nil
 			}
 
 			return // Assuming each video only appears once in the stream list
@@ -75,8 +79,8 @@ func (vs *VideoStreams) RemoveStream(video string, client Client) {
 	}
 }
 
-func (vs *VideoStreams) GetStreamClients(video string) []Client {
-	var clients []Client
+func (vs *VideoStreams) GetStreamClients(video string) []*Client {
+	var clients []*Client
 	vs.mutex.Lock()
 	defer vs.mutex.Unlock()
 

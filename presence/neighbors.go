@@ -24,7 +24,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
 		Length:    0,
-		Timestamp: int32(time.Now().UnixMilli()),
+		Timestamp: time.Now().UnixMilli(),
 		Sender:    cnf.NodeIP.String(),
 		Target:    "",
 	}
@@ -58,7 +58,6 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			}
 
 			msg.Target = nb.ToString()
-			msg.Timestamp = int32(time.Now().UnixMilli())
 			msg.Content = &protobuf.Header_DistanceVectorRouting{
 				DistanceVectorRouting: dvr.Dvr,
 			}
@@ -129,7 +128,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 	dvtList, delayList := processResults(results, *cnf)
 
 	// Update the content of the routing table
-	return distancevectorrouting.NewRouting(cnf.NodeIP, dvtList, delayList)
+	return distancevectorrouting.NewRouting(cnf.NodeName, cnf.NodeIP, dvtList, delayList)
 }
 
 func markNeighborAsDisconnected(dvr *distancevectorrouting.DistanceVectorRouting, nb distancevectorrouting.Interface) (*NeighborResult, error) {
@@ -230,7 +229,7 @@ func addResult(routingTables *[]distancevectorrouting.DistanceVectorRouting, dis
 
 	*distances = append(*distances, distancevectorrouting.RequestRoutingDelay{
 		Neighbor: distancevectorrouting.Interface{Interface: result.Neighbor},
-		Delay:    int(result.Time),
+		Delay:    int64(result.Time),
 	})
 }
 

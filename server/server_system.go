@@ -80,14 +80,20 @@ func (ss *ServerSystem) ListenForClients() {
 				case protobuf.RequestType_RETRANSMIT:
 
 					// check if the message is for this server
-					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
+					/* if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
 						ss.Logger.Error(fmt.Sprintf("Received message for %s, but this is %s\n", header.GetTarget(), ss.PresenceSystem.Config.NodeName))
 						ss.Logger.Info(fmt.Sprintf("Trying to retransmit to %s\n", header.GetTarget()))
 
 						presence.HandleRetransmitFromClient(ss.PresenceSystem, header)
 						return
+					}*/
+					if header.GetClientCommand() == nil {
+						ss.Logger.Error("Invalid client command, the server only accepts client's commands")
+						return
 					}
-
+					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
+						return
+					}
 					ss.Logger.Info(fmt.Sprintf("Received message %s\n", header.GetClientCommand().AdditionalInformation))
 
 					// this specifies where the message needs to go
@@ -108,9 +114,6 @@ func (ss *ServerSystem) ListenForClients() {
 						ss.StopVideoStream(header)
 						break
 					}
-
-					// TODO have another thread that for each video stream, streams
-					presence.HandleRetransmit(ss.PresenceSystem, header)
 				}
 
 			}(stream)
@@ -123,7 +126,7 @@ func (ss *ServerSystem) StartVideoStream(header *protobuf.Header) {
 	clientName := header.GetTarget()
 	ss.Logger.Info(fmt.Sprintf("Starting video stream for %s, requesting %s\n", clientName, videoChoice))
 
-	client := Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
+	client := &Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
 
 	ss.VideoStreams.AddStream(videoChoice, client)
 }
@@ -149,12 +152,12 @@ func (ss *ServerSystem) BackgroundStreaming() {
 				Type:           protobuf.RequestType_RETRANSMIT,
 				// to be determined
 				Length:    0,
-				Timestamp: int32(time.Now().Unix()),
+				Timestamp: time.Now().UnixMilli(),
 				Content: &protobuf.Header_ServerVideoChunk{
 					ServerVideoChunk: &protobuf.ServerVideoChunk{
 						Data:           []byte(fmt.Sprintf("Sending video stream for %s", video.Video)),
 						SequenceNumber: 0,
-						Timestamp:      time.Now().Unix(),
+						Timestamp:      time.Now().UnixMilli(),
 						Format:         protobuf.VideoFormat_MJPEG,
 						IsLastChunk:    false,
 					},
@@ -165,14 +168,15 @@ func (ss *ServerSystem) BackgroundStreaming() {
 			for _, client := range video.Clients {
 
 				sqNumber := 0
-				for {
+				for len(video.Clients) != 0 {
+
 					sqNumber += 1
 					header.Target = client.PresenceNodeName
 					header.ClientIp = client.ClientIP
 					header.Length = int32(len(header.Content.(*protobuf.Header_ServerVideoChunk).ServerVideoChunk.Data))
 					header.GetServerVideoChunk().SequenceNumber = int32(sqNumber)
 
-          ss.sendVideoChunk(header)
+					ss.sendVideoChunk(header)
 				}
 			}
 
@@ -185,15 +189,15 @@ func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
 
 	nextHop, err := ss.PresenceSystem.RoutingTable.GetNextHop(target)
 	if err != nil {
-    ss.Logger.Error(err.Error())
+		ss.Logger.Error(err.Error())
 		return
 	}
 
 	// open a connection with nextHop and be persistent trying to send the message
 	neighbor := nextHop.NextNode
 
-  failCount := 0
-  limitFails := 3 
+	failCount := 0
+	limitFails := 3
 
 	for {
 		var msg []byte
@@ -202,26 +206,26 @@ func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
 		defer config.CloseStream(neighborStream)
 
 		if err != nil {
-      ss.Logger.Error(err.Error())
+			ss.Logger.Error(err.Error())
 			goto fail
 		}
 
-    msg, err = config.MarshalHeader(header)
+		msg, err = config.MarshalHeader(header)
 		err = config.SendMessage(neighborStream, msg)
 
 		if err != nil {
-      ss.Logger.Error(err.Error())
+			ss.Logger.Error(err.Error())
 			goto fail
 		}
 
 		break
 
 	fail:
-    failCount += 1
-    if failCount > limitFails {
-      ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s\n", neighborIp))
+		failCount += 1
+		if failCount > limitFails {
+			ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s\n", neighborIp))
 			break
-    }
+		}
 		continue
 	}
 }

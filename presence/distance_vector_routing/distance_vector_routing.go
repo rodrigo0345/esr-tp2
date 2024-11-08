@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -58,10 +59,10 @@ type NeighborRouting struct {
 
 type RequestRoutingDelay struct {
 	Neighbor Interface
-	Delay    int
+	Delay    int64
 }
 
-func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVectorRouting, requestRoutingDelay []RequestRoutingDelay) *DistanceVectorRouting {
+func NewRouting(myName string, myIP *protobuf.Interface, neighborsRoutingTable []DistanceVectorRouting, requestRoutingDelay []RequestRoutingDelay) *DistanceVectorRouting {
 
 	// Create a new DistanceVectorRouting instance to hold the combined routing table
 	newRoutingTable := &DistanceVectorRouting{
@@ -73,7 +74,7 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 	}
 
 	// Build a map of neighbor delays for quick lookup
-	delayMap := make(map[string]int)
+	delayMap := make(map[string]int64)
 	for _, req := range requestRoutingDelay {
 		delayMap[req.Neighbor.ToString()] = req.Delay
 	}
@@ -86,16 +87,16 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 
 		for dest, nextHop := range neighborTable.Dvr.Entries {
 
-			if dest == myIP.String() {
+			if dest == myName {
 				newRoutingTable.Dvr.Entries[dest] = &protobuf.NextHop{
 					NextNode: myIP, // Use the neighborID as the next node
 					Distance: 0,
 				}
 			}
 
-			var newDistance int32 = math.MaxInt32
-			if nextHop.Distance != math.MaxInt32 {
-				newDistance = nextHop.Distance + int32(neighborDelay/1000)
+			var newDistance int64 = math.MaxInt64
+			if nextHop.Distance != math.MaxInt64 {
+				newDistance = nextHop.Distance + neighborDelay
 			}
 
 			existingNextHop, found := newRoutingTable.Dvr.Entries[dest]
@@ -113,7 +114,7 @@ func NewRouting(myIP *protobuf.Interface, neighborsRoutingTable []DistanceVector
 	return newRoutingTable
 }
 
-func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *DistanceVectorRouting, timeTook int32) {
+func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *DistanceVectorRouting, timeTook int64) {
 	dvr.Lock()
 	defer dvr.Unlock()
 
@@ -124,9 +125,9 @@ func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *D
 		}
 
 		// Calculate the new distance considering the time delay
-		var newDistance int32 = math.MaxInt32
-		if newDistance != math.MaxInt32 {
-			newDistance = int32(nextHop.Distance + (timeTook / 1000))
+		var newDistance int64 = math.MaxInt64
+		if nextHop.Distance != math.MaxInt64 {
+			newDistance = nextHop.Distance + timeTook
 		}
 
 		// Retrieve the current data in our routing table for this destination
@@ -135,10 +136,10 @@ func (dvr *DistanceVectorRouting) WeakUpdate(cnf *config.AppConfigList, other *D
 		// Update if:
 		// - The destination is not found (new route)
 		// - The new route through the neighbor is shorter
-		if !found || int32(newDistance) < int32(currentData.Distance) {
+		if !found || newDistance < currentData.Distance {
 			dvr.Dvr.Entries[dest] = &protobuf.NextHop{
 				NextNode: other.Dvr.Source,
-				Distance: int32(newDistance),
+				Distance: newDistance,
 			}
 		}
 	}
@@ -174,7 +175,7 @@ func (dvr *DistanceVectorRouting) GetNextHop(dest string) (*protobuf.NextHop, er
 
 func (dvr *DistanceVectorRouting) GetName(ip *protobuf.Interface) (string, error) {
 	for key, nextHop := range dvr.Dvr.Entries {
-		if nextHop.NextNode.String() != ip.String() {
+		if fmt.Sprintf("%s:%d", nextHop.NextNode.Ip, nextHop.NextNode.Port) != fmt.Sprintf("%s:%d", ip.Ip, ip.Port) {
 			continue
 		}
 		return key, nil
@@ -193,7 +194,19 @@ func (dvr *DistanceVectorRouting) Unmarshal(data []byte) error {
 
 func (dvr *DistanceVectorRouting) Print() {
 	fmt.Println("Routing Table:")
-	for dest, nextHop := range dvr.Dvr.Entries {
+
+	// Coletar as entradas em uma slice para classificação
+	entries := make([]string, 0, len(dvr.Dvr.Entries))
+	for dest := range dvr.Dvr.Entries {
+		entries = append(entries, dest)
+	}
+
+	// Ordenar as entradas por nome (destino)
+	sort.Strings(entries)
+
+	// Imprimir a tabela de roteamento ordenada
+	for _, dest := range entries {
+		nextHop := dvr.Dvr.Entries[dest]
 		fmt.Printf("%s | %d | %s\n", dest, nextHop.Distance, Interface{nextHop.NextNode}.ToString())
 	}
 }

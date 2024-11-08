@@ -114,6 +114,10 @@ func HandleRetransmitFromClient(ps *PresenceSystem, header *protobuf.Header) {
 
 	fail:
 		// try with another neighbor
+		if len(ps.NeighborList.Content)-1 == nextNeighbor {
+			break
+		}
+
 		neighbor = ps.NeighborList.Content[nextNeighbor]
 		nextNeighbor++
 		continue
@@ -159,7 +163,7 @@ func SendMessage(ps *PresenceSystem, header *protobuf.Header) {
 	fail:
 		failCount += 1
 		if failCount > limitFails {
-			ps.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s\n", neighborIp))
+			ps.Logger.Error(fmt.Sprintf("Failed to send message to %s\n", neighborIp))
 			break
 		}
 		continue

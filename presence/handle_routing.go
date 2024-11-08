@@ -16,14 +16,14 @@ import (
 func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream, header *protobuf.Header) {
 	// the source needs to be updated only when sending the routing table
 	remote := conn.RemoteAddr().String()
-  receivedDvr := &dvrouting.DistanceVectorRouting{Mutex: sync.RWMutex{}, Dvr: header.GetDistanceVectorRouting()}
-	timeTook := int32(time.Since(time.UnixMilli(int64(header.Timestamp))))
+	receivedDvr := &dvrouting.DistanceVectorRouting{Mutex: sync.RWMutex{}, Dvr: header.GetDistanceVectorRouting()}
+	timeTook := time.Since(time.UnixMilli(int64(header.Timestamp)))
 
 	// send our routing table back
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
 		Length:    0,
-		Timestamp: int32(time.Now().UnixMilli()),
+		Timestamp: time.Now().UnixMilli(),
 
 		Content: &protobuf.Header_DistanceVectorRouting{
 			DistanceVectorRouting: ps.RoutingTable.Dvr,
@@ -39,9 +39,9 @@ func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream,
 
 	rm := config.ToInterface(remote)
 	remoteIp := rm.Ip
-  remotePort := receivedDvr.Dvr.Source.Port
+	remotePort := receivedDvr.Dvr.Source.Port
 
-  // update the source of the received dvr
+	// update the source of the received dvr
 	receivedDvr.UpdateSource(dvrouting.Interface{Interface: &protobuf.Interface{
 		Ip:   remoteIp,
 		Port: remotePort,
@@ -61,6 +61,6 @@ func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream,
 
 	in.Port = receivedDvr.Dvr.Source.Port
 
-	ps.RoutingTable.WeakUpdate(ps.Config, receivedDvr, timeTook)
+	ps.RoutingTable.WeakUpdate(ps.Config, receivedDvr, int64(timeTook))
 	ps.NeighborList.AddNeighbor(in, ps.Config)
 }

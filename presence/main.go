@@ -10,7 +10,7 @@ func Presence(config *config.AppConfigList) {
 
 	presenceSystem := NewPresenceSystem(config)
 
-	go presenceSystem.HeartBeatNeighbors(5)
+	go presenceSystem.HeartBeatNeighbors(7)
 
 	// kill clients that dont ping in a while
 	go presenceSystem.HeartBeatClients(5)

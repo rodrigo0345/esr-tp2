@@ -86,7 +86,7 @@ func Client(config *config.AppConfigList) {
 		message := protobuf.Header{
 			Type:           protobuf.RequestType_RETRANSMIT,
 			Length:         0,
-			Timestamp:      int32(time.Now().UnixMilli()),
+			Timestamp:      time.Now().UnixMilli(),
 			ClientIp:       listenIp, // this is where the client is waiting for the response
 			Sender:         "client",
 			Target:         target,
