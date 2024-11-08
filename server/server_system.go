@@ -88,9 +88,9 @@ func (ss *ServerSystem) ListenForClients() {
 						return
 					}*/
 					if header.GetClientCommand() == nil {
-						ss.Logger.Error("Invalid client command, the server only accepts client's commands")
 						return
 					}
+
 					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
 						return
 					}

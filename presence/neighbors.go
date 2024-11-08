@@ -152,7 +152,7 @@ func markNeighborAsDisconnected(dvr *distancevectorrouting.DistanceVectorRouting
 
 	return &NeighborResult{
 		Neighbor:     nbIP,
-		Time:         time.Duration(int32(math.MaxInt32)),
+		Time:         time.Duration(math.MaxInt64),
 		RoutingTable: table,
 	}, nil
 }

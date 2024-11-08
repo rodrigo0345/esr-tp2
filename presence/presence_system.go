@@ -139,10 +139,13 @@ func (ps *PresenceSystem) ListenForClients() {
 
 				videoName := header.RequestedVideo
 
+        videoChunk := header.GetServerVideoChunk()
+
 				// check if the target is the client and check if the client is connected on this node
-				if ps.CurrentStreams[videoName] != nil && len(ps.CurrentStreams[videoName].Content) > 0 {
+				if videoChunk != nil && ps.CurrentStreams[videoName] != nil && len(ps.CurrentStreams[videoName].Content) > 0 {
 
 					for _, client := range ps.CurrentStreams[videoName].Content {
+            ps.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", fmt.Sprintf("%s:%d", client.Ip, client.Port)))
 						// send the message to all interested clients
 						streaming.RedirectPacketToClient(data, fmt.Sprintf("%s:%d", client.Ip, client.Port))
 					}
@@ -184,6 +187,8 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			continue
 		}
 
+    remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP.String(), 2222)
+
 		go func(data []byte, addr *net.UDPAddr) {
 			header, err := config.UnmarshalHeader(data)
 			if err != nil {
@@ -198,7 +203,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 
 				// add the client to the list
 				ps.CurrentStreams[videoName] = &ClientList{}
-				ps.CurrentStreams[videoName].Add(config.ToInterface(header.ClientIp))
+				ps.CurrentStreams[videoName].Add(config.ToInterface(remoteIp))
 				ps.Logger.Info(fmt.Sprintf("Received message from %s\n", addr))
 
 				// modify data to set the sender to this node

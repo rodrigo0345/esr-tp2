@@ -2,7 +2,6 @@ package presence
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -49,18 +48,18 @@ func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream,
 
 	data, err := proto.Marshal(&msg)
 	if err != nil {
-		log.Printf("Error marshaling routing table: %v\n", err)
+    ps.Logger.Error(err.Error())
 		return
 	}
 
 	err = config.SendMessage(stream, data)
 	if err != nil {
-		log.Printf("Error sending routing table: %v\n", err)
+    ps.Logger.Error(err.Error())
 		return
 	}
-
-	in.Port = receivedDvr.Dvr.Source.Port
+  
+  rm.Port = receivedDvr.Dvr.Source.Port
 
 	ps.RoutingTable.WeakUpdate(ps.Config, receivedDvr, int64(timeTook))
-	ps.NeighborList.AddNeighbor(in, ps.Config)
+	ps.NeighborList.AddNeighbor(rm, ps.Config)
 }
