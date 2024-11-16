@@ -19,6 +19,7 @@ message Header {
     ClientCommand client_command = 6;
     ServerVideoChunk server_video_chunk = 7;
     DistanceVectorRouting distance_vector_routing = 8;
+    BootstraperResult bootstraper_result = 11;
   }
 
   string client_ip = 9;
@@ -31,7 +32,14 @@ enum RequestType {
   RETRANSMIT = 1;
   // just to check if the client is still alive
   HEARTBEAT = 2;
+  BOOTSTRAPER = 3;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Bootstraper
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+message BootstraperResult { repeated string neighbors = 1; }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Client to Server

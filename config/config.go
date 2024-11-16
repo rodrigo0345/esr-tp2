@@ -16,6 +16,7 @@ const (
 	Server AppConfig = iota
 	Presence
 	Client
+  Bootstrapper
 )
 
 type ServerUrl struct {

@@ -9,18 +9,21 @@ import (
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"github.com/rodrigo0345/esr-tp2/presence"
+	"github.com/rodrigo0345/esr-tp2/server/boostrapper"
 )
 
 type ServerSystem struct {
 	PresenceSystem *presence.PresenceSystem
 	Logger         *config.Logger
 	VideoStreams   VideoStreams
+  Bootstrapper   *boostrapper.Bootstrapper
 }
 
 func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 	return &ServerSystem{
 		PresenceSystem: presence.NewPresenceSystem(cnf),
 		Logger:         config.NewLogger(2),
+    Bootstrapper:   boostrapper.NewBootstrapper("boostrapper/nb.json", config.NewLogger(2)),
 	}
 }
 
@@ -71,12 +74,19 @@ func (ss *ServerSystem) ListenForClients() {
 					return
 				}
 
+				ss.Logger.Info(fmt.Sprintf("Received message from %s, type %s", header.GetSender(), header.GetType()))
+
 				switch header.Type {
 				case protobuf.RequestType_ROUTINGTABLE:
 
 					presence.HandleRouting(ss.PresenceSystem, session, stream, header)
-
 					break
+
+				case protobuf.RequestType_BOOTSTRAPER:
+
+          ss.Bootstrapper.Bootstrap(session, stream, header)
+          break
+
 				case protobuf.RequestType_RETRANSMIT:
 
 					// check if the message is for this server
@@ -87,11 +97,14 @@ func (ss *ServerSystem) ListenForClients() {
 						presence.HandleRetransmitFromClient(ss.PresenceSystem, header)
 						return
 					}*/
+
 					if header.GetClientCommand() == nil {
+						ss.Logger.Error(fmt.Sprintf("Received message with no client command\n"))
 						return
 					}
 
 					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
+						ss.Logger.Error(fmt.Sprintf("Received message from %s, but target is %s\n", header.GetSender(), header.GetTarget()))
 						return
 					}
 					ss.Logger.Info(fmt.Sprintf("Received message %s\n", header.GetClientCommand().AdditionalInformation))

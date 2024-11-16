@@ -42,6 +42,18 @@ func commandParser(command []string) (*config.AppConfigList, error) {
 			Neighbors: neighborList,
 		}
 		return &config, nil
+	case "bootstrapper":
+		nodeIP := config.ToInterface(*specificIP)
+		var neighborList []*protobuf.Interface
+		if *neighbors != "" {
+			neighborList = parseNeighbors(*neighbors)
+		}
+		config := config.AppConfigList{
+			Topology:  config.Bootstrapper,
+			NodeIP:    nodeIP,
+			Neighbors: neighborList,
+		}
+		return &config, nil
 	case "presence":
 		// Parse node IP and neighbors
 		nodeIP := config.ToInterface(*specificIP)

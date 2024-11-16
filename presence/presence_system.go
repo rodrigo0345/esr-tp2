@@ -15,12 +15,13 @@ import (
 )
 
 type PresenceSystem struct {
-	RoutingTable   *dvr.DistanceVectorRouting
-	NeighborList   *NeighborList
-	CurrentStreams map[string]*ClientList
-	ConnectionPool *dvr.ConnectionPool
-	Logger         *config.Logger
-	Config         *config.AppConfigList
+	RoutingTable         *dvr.DistanceVectorRouting
+	NeighborList         *NeighborList
+	CurrentClientStreams map[string]*ClientList
+	CurrentNodeStreams   map[string]*NodeList
+	ConnectionPool       *dvr.ConnectionPool
+	Logger               *config.Logger
+	Config               *config.AppConfigList
 }
 
 func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
@@ -31,16 +32,18 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 
 	// used to reduce the time spent opening and closing connections
 	neighborsConnectionsMap := dvr.NewNeighborsConnectionsMap()
+	currentNodeStreams := make(map[string]*NodeList)
 
 	logger := config.NewLogger(2)
 
 	return &PresenceSystem{
-		RoutingTable:   routingTable,
-		NeighborList:   neighborList,
-		CurrentStreams: make(map[string]*ClientList),
-		ConnectionPool: neighborsConnectionsMap,
-		Logger:         logger,
-		Config:         cnf,
+		RoutingTable:         routingTable,
+		NeighborList:         neighborList,
+		CurrentClientStreams: make(map[string]*ClientList),
+		CurrentNodeStreams:   currentNodeStreams,
+		ConnectionPool:       neighborsConnectionsMap,
+		Logger:               logger,
+		Config:               cnf,
 	}
 }
 
@@ -55,16 +58,16 @@ func (ps *PresenceSystem) HeartBeatNeighbors(seconds int) {
 func (ps *PresenceSystem) HeartBeatClients(seconds int) {
 	for {
 		// kill clients that dont ping in a while
-		for video := range ps.CurrentStreams {
-			ps.CurrentStreams[video].RemoveDeadClients(seconds)
+		for video := range ps.CurrentClientStreams {
+			ps.CurrentClientStreams[video].RemoveDeadClients(seconds)
 
 			// if the list is empty, notify the server that it can stop streaming
-			if len(ps.CurrentStreams[video].Content) != 0 {
+			if len(ps.CurrentClientStreams[video].Content) != 0 {
 				break
 			}
 
 			ps.Logger.Info(fmt.Sprintf("No clients are connected to %s\n", video))
-			delete(ps.CurrentStreams, video)
+			delete(ps.CurrentClientStreams, video)
 
 			header := &protobuf.Header{
 				Type:           protobuf.RequestType_RETRANSMIT,
@@ -137,21 +140,63 @@ func (ps *PresenceSystem) ListenForClients() {
 
 			case protobuf.RequestType_RETRANSMIT:
 
+        ps.Logger.Info(fmt.Sprintf("Received message from %s", header.Sender))
 				videoName := header.RequestedVideo
 
-        videoChunk := header.GetServerVideoChunk()
+				serverMessage := header.GetServerVideoChunk() != nil
+				clientMessage := header.GetClientCommand() != nil
 
 				// check if the target is the client and check if the client is connected on this node
-				if videoChunk != nil && ps.CurrentStreams[videoName] != nil && len(ps.CurrentStreams[videoName].Content) > 0 {
+				if serverMessage && ps.CurrentClientStreams[videoName] != nil && len(ps.CurrentClientStreams[videoName].Content) > 0 {
 
-					for _, client := range ps.CurrentStreams[videoName].Content {
-            ps.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", fmt.Sprintf("%s:%d", client.Ip, client.Port)))
+					for _, client := range ps.CurrentClientStreams[videoName].Content {
+						ps.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", fmt.Sprintf("%s:%d", client.Ip, client.Port)))
 						// send the message to all interested clients
 						streaming.RedirectPacketToClient(data, fmt.Sprintf("%s:%d", client.Ip, client.Port))
 					}
 
 					break
 				}
+
+				// ------- EFFICIENT RETRANSMITION -------
+
+				// make the nodes know what video they are about to stream
+				if clientMessage && header.RequestedVideo != "" {
+					ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
+					// check if the node is already streaming and just add the client to the list
+					if exists := ps.CurrentNodeStreams[header.RequestedVideo]; exists != nil {
+						// now the current stream is going to be streamd to this node too
+
+						ps.CurrentNodeStreams[header.RequestedVideo] = &NodeList{}
+						ps.CurrentNodeStreams[header.RequestedVideo].Add(header.Sender)
+					} else {
+						ps.CurrentNodeStreams[header.RequestedVideo] = &NodeList{}
+						ps.CurrentNodeStreams[header.RequestedVideo].Add(header.Sender)
+					}
+				}
+
+				// this is the stream
+				if serverMessage {
+
+					// streaming
+					video := header.RequestedVideo
+
+					ps.Logger.Info(fmt.Sprintf("Server %s is sending video '%s'\n", header.GetSender(), header.RequestedVideo))
+					if ps.CurrentNodeStreams[video] == nil {
+						break
+					}
+
+					for _, node := range ps.CurrentNodeStreams[video].Content {
+						// send the message to all interested clients
+						ps.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", node.Node))
+						header.Target = node.Node
+						HandleRetransmit(ps, header)
+					}
+
+					break
+				}
+
+				// ------- EFFICIENT RETRANSMITION -------
 
 				HandleRetransmit(ps, header)
 				break
@@ -187,7 +232,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			continue
 		}
 
-    remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP.String(), 2222)
+		remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP.String(), 2222)
 
 		go func(data []byte, addr *net.UDPAddr) {
 			header, err := config.UnmarshalHeader(data)
@@ -202,8 +247,8 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 				videoName := header.RequestedVideo
 
 				// add the client to the list
-				ps.CurrentStreams[videoName] = &ClientList{}
-				ps.CurrentStreams[videoName].Add(config.ToInterface(remoteIp))
+				ps.CurrentClientStreams[videoName] = &ClientList{}
+				ps.CurrentClientStreams[videoName].Add(config.ToInterface(remoteIp))
 				ps.Logger.Info(fmt.Sprintf("Received message from %s\n", addr))
 
 				// modify data to set the sender to this node
@@ -215,7 +260,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 				// and if the list is empty, notify the server that it can stop streaming
 			case protobuf.RequestType_HEARTBEAT:
 
-				for _, video := range ps.CurrentStreams {
+				for _, video := range ps.CurrentClientStreams {
 					video.ResetPing(header.ClientIp)
 				}
 

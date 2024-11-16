@@ -15,6 +15,8 @@ func HandleRetransmit(ps *PresenceSystem, header *protobuf.Header) {
 		return
 	}
 
+  ps.Logger.Info(fmt.Sprintf("Sending message to %v", nextHop.NextNode))
+
 	// open a connection with nextHop and try to send the message
 	// if it fails, send to another neighbor, and remove it from the list
 	neighbor := nextHop.NextNode
@@ -30,7 +32,7 @@ func HandleRetransmit(ps *PresenceSystem, header *protobuf.Header) {
 		}
 
 		neighborStream, _, err := ps.ConnectionPool.GetConnectionStream(neighborIp)
-		defer config.CloseStream(neighborStream)
+		// defer config.CloseStream(neighborStream)
 
 		if err != nil {
 			ps.Logger.Error(err.Error())

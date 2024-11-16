@@ -3,12 +3,29 @@ package presence
 import (
 	_ "encoding/json"
 	"fmt"
+
 	"github.com/rodrigo0345/esr-tp2/config"
+	"github.com/rodrigo0345/esr-tp2/config/protobuf"
+	"github.com/rodrigo0345/esr-tp2/presence/bootstrapper"
 )
 
-func Presence(config *config.AppConfigList) {
+func Presence(cnf *config.AppConfigList) {
 
-	presenceSystem := NewPresenceSystem(config)
+  // Boostrap the neighbors
+  NeighborList, err := bootstrapper.BSGetNeighbors(cnf, cnf.Neighbors[0])
+
+  cnf.Neighbors = []*protobuf.Interface{}
+  for _, neighbor := range NeighborList {
+    nb := config.ToInterface(neighbor)
+    cnf.Neighbors = append(cnf.Neighbors, nb)
+  }
+
+	presenceSystem := NewPresenceSystem(cnf)
+
+  if err != nil {
+    presenceSystem.Logger.Error(err.Error())
+    return
+  }
 
 	go presenceSystem.HeartBeatNeighbors(7)
 
