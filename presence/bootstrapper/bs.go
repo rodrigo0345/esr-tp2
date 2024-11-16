@@ -29,12 +29,10 @@ func BSGetNeighbors(cnf *config.AppConfigList, bsAddr *protobuf.Interface) ([]st
   addr := fmt.Sprintf("%s:%d", bsAddr.Ip, bsAddr.Port)
 
   // create a new connection
-  stream, conn, err := config.StartConnStream(addr)
+  stream, _, err := config.StartConnStream(addr)
   if err != nil {
     return nil, err
   }
-  defer config.CloseStream(stream)
-  defer config.CloseConnection(conn)
 
   // send the message
   err = config.SendMessage(stream, data)
@@ -48,10 +46,6 @@ func BSGetNeighbors(cnf *config.AppConfigList, bsAddr *protobuf.Interface) ([]st
     return nil, err
   }
   proto.Unmarshal(dataRecv, &message)
-
-  if message.GetType() != protobuf.RequestType_BOOTSTRAPER {
-    return nil, err
-  }
 
   neighbors := message.GetBootstraperResult().GetNeighbors()
 

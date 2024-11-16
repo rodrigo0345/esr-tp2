@@ -2,6 +2,7 @@ package boostrapper
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"time"
 
@@ -39,6 +40,8 @@ func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, h
 		return
 	}
 
+  bs.logger.Info(fmt.Sprintf("Sending Neighbors: %v\n", nodeNeighbors[header.Sender]))
+
 	message := protobuf.Header{
 		Type:           protobuf.RequestType_RETRANSMIT,
 		Length:         0,
@@ -53,6 +56,8 @@ func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, h
 			},
 		},
 	}
+  message.Length = int32(proto.Size(&message))
+  message.Target = session.RemoteAddr().String()
 
   data, err = proto.Marshal(&message)
 

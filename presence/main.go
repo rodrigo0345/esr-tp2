@@ -14,8 +14,14 @@ func Presence(cnf *config.AppConfigList) {
   // Boostrap the neighbors
   NeighborList, err := bootstrapper.BSGetNeighbors(cnf, cnf.Neighbors[0])
 
+  if err != nil {
+    fmt.Printf("Error getting neighbors: %s\n", err.Error())
+    return
+  }
+
   cnf.Neighbors = []*protobuf.Interface{}
   for _, neighbor := range NeighborList {
+    fmt.Printf("Neighbor: %s\n", neighbor)
     nb := config.ToInterface(neighbor)
     cnf.Neighbors = append(cnf.Neighbors, nb)
   }

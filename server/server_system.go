@@ -23,7 +23,7 @@ func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 	return &ServerSystem{
 		PresenceSystem: presence.NewPresenceSystem(cnf),
 		Logger:         config.NewLogger(2),
-    Bootstrapper:   boostrapper.NewBootstrapper("boostrapper/nb.json", config.NewLogger(2)),
+    Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2)),
 	}
 }
 
