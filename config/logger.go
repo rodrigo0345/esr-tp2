@@ -25,11 +25,11 @@ func (l *Logger) Log(level int, message string) {
 		// add colors depending on the level
 		switch level {
 		case 0:
-			fmt.Printf("\x1b[31m%s->%s\x1b[0m\n", l.nodeName, message)
+			fmt.Printf("\x1b[31m[%s] %s\x1b[0m\n", l.nodeName, message)
 		case 1:
-			fmt.Printf("\x1b[32m%s->%s\x1b[0m\n", l.nodeName, message)
+			fmt.Printf("\x1b[32m[%s] %s\x1b[0m\n", l.nodeName, message)
 		case 2:
-			fmt.Printf("\x1b[33m%s->%s\x1b[0m\n", l.nodeName, message)
+			fmt.Printf("\x1b[33m[%s] %s\x1b[0m\n", l.nodeName, message)
 		}
 	}
 }

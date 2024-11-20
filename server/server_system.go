@@ -24,6 +24,7 @@ func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 		PresenceSystem: presence.NewPresenceSystem(cnf),
 		Logger:         config.NewLogger(2, cnf.NodeName),
     Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2, cnf.NodeName)),
+    VideoStreams:   *NewVideoStreams(),
 	}
 }
 

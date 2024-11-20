@@ -49,8 +49,8 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 
 func (ps *PresenceSystem) HeartBeatNeighbors(seconds int) {
 	for {
-		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Config, ps.RoutingTable, ps.ConnectionPool)
-    // ps.RoutingTable.Print()
+		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Logger, ps.Config, ps.RoutingTable, ps.ConnectionPool)
+    ps.RoutingTable.Print(ps.Logger)
 		time.Sleep(time.Second * time.Duration(seconds))
 	}
 }
@@ -75,7 +75,7 @@ func (ps *PresenceSystem) HeartBeatClients(seconds int) {
 				Timestamp:      time.Now().UnixMilli(),
 				ClientIp:       fmt.Sprintf("%s:%d", ps.Config.NodeIP.Ip, ps.Config.NodeIP.Port),
 				Sender:         ps.Config.NodeName,
-				Target:         "server", // TODO: change this and make it dynamic
+				Target:         "s1", // TODO: change this and make it dynamic
 				RequestedVideo: video,
 				Content: &protobuf.Header_ClientCommand{
 					ClientCommand: &protobuf.ClientCommand{

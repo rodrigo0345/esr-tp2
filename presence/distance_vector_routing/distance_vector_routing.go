@@ -192,8 +192,8 @@ func (dvr *DistanceVectorRouting) Unmarshal(data []byte) error {
 	return proto.Unmarshal(data, dvr.Dvr)
 }
 
-func (dvr *DistanceVectorRouting) Print() {
-	fmt.Println("Routing Table:")
+func (dvr *DistanceVectorRouting) Print(logger *config.Logger) {
+  logger.Info("Routing Table:")
 
 	// Coletar as entradas em uma slice para classificação
 	entries := make([]string, 0, len(dvr.Dvr.Entries))
@@ -207,6 +207,6 @@ func (dvr *DistanceVectorRouting) Print() {
 	// Imprimir a tabela de roteamento ordenada
 	for _, dest := range entries {
 		nextHop := dvr.Dvr.Entries[dest]
-		fmt.Printf("%s | %d | %s\n", dest, nextHop.Distance, Interface{nextHop.NextNode}.ToString())
+    logger.Info(fmt.Sprintf("%s | %d | %s", dest, nextHop.Distance, Interface{nextHop.NextNode}.ToString()))
 	}
 }

@@ -1,6 +1,7 @@
 package presence
 
 import (
+	"fmt"
 	"log"
 	"math"
 	_ "net"
@@ -19,7 +20,7 @@ type NeighborResult struct {
 	RoutingTable *protobuf.DistanceVectorRouting
 }
 
-func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.ConnectionPool) *distancevectorrouting.DistanceVectorRouting {
+func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.ConnectionPool) *distancevectorrouting.DistanceVectorRouting {
 
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
@@ -29,6 +30,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 		Target:    "",
 	}
 	msg.Length = int32(proto.Size(&msg))
+
 	dvr.Dvr.Source = &protobuf.Interface{
 		Ip:   cnf.NodeIP.Ip,
 		Port: cnf.NodeIP.Port,
@@ -48,7 +50,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			// Start a new QUIC connection and stream if it doesn't exist already
 			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
 			if err != nil {
-				log.Printf("Error starting stream to %s: %v\n", nb.ToString(), err)
+        logger.Error(fmt.Sprintf("Error starting stream to %s: %v", nb.ToString(), err))
 				r, err := markNeighborAsDisconnected(dvr, nb)
 				if err != nil {
 					return
@@ -63,13 +65,14 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 			}
 
 			data, err := proto.Marshal(&msg)
+
 			if err != nil {
-				log.Printf("Error marshaling ping: %v\n", err)
+        logger.Error(fmt.Sprintf("Error marshaling ping: %v", err))
 				return
 			}
 
 			if err := config.SendMessage(stream, data); err != nil {
-				log.Printf("Error sending ping to %s: %v\n", nb.ToString(), err)
+        logger.Error(fmt.Sprintf("Error sending ping to %s: %v", nb.ToString(), err))
 				r, err := markNeighborAsDisconnected(dvr, nb)
 				if err != nil {
 					return
@@ -80,7 +83,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 
 			responseData, err := config.ReceiveMessage(stream)
 			if err != nil {
-				log.Printf("Error receiving message from %s: %v\n", nb.ToString(), err)
+        logger.Error(fmt.Sprintf("Error receiving message from %s: %v", nb.ToString(), err))
 				r, err := markNeighborAsDisconnected(dvr, nb)
 				if err != nil {
 					return
@@ -91,7 +94,7 @@ func (nbl *NeighborList) PingNeighbors(cnf *config.AppConfigList, dvr *distancev
 
 			var response protobuf.Header
 			if err := proto.Unmarshal(responseData, &response); err != nil {
-				log.Printf("Error unmarshaling routing table from %s: %v\n", nb.ToString(), err)
+        logger.Error(fmt.Sprintf("Error unmarshaling routing table from %s: %v", nb.ToString(), err))
 				return
 			}
 
@@ -138,10 +141,8 @@ func markNeighborAsDisconnected(dvr *distancevectorrouting.DistanceVectorRouting
 	if err != nil {
 		return nil, err
 	}
+
 	nbIP := neighborIp.NextNode
-	if err != nil {
-		return nil, err
-	}
 
 	table := &protobuf.DistanceVectorRouting{
 		Entries: make(map[string]*protobuf.NextHop),

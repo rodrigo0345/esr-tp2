@@ -13,6 +13,7 @@ import (
 )
 
 func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream, header *protobuf.Header) {
+
 	// the source needs to be updated only when sending the routing table
 	remote := conn.RemoteAddr().String()
 	receivedDvr := &dvrouting.DistanceVectorRouting{Mutex: sync.RWMutex{}, Dvr: header.GetDistanceVectorRouting()}
@@ -28,6 +29,7 @@ func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream,
 			DistanceVectorRouting: ps.RoutingTable.Dvr,
 		},
 	}
+
 	msg.Length = int32(proto.Size(&msg))
 
 	local := conn.LocalAddr().String()

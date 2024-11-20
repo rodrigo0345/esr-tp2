@@ -28,12 +28,7 @@ func Presence(cnf *config.AppConfigList) {
 
 	presenceSystem := NewPresenceSystem(cnf)
 
-  if err != nil {
-    presenceSystem.Logger.Error(err.Error())
-    return
-  }
-
-	go presenceSystem.HeartBeatNeighbors(7)
+	go presenceSystem.HeartBeatNeighbors(5)
 
 	// kill clients that dont ping in a while
 	go presenceSystem.HeartBeatClients(5)
