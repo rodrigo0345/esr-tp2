@@ -42,7 +42,7 @@ func Client(config *config.AppConfigList) {
 	// Run a goroutine to listen for incoming messages
 	go func() {
 		for {
-			buffer := make([]byte, 1024)
+			buffer := make([]byte, 65535)
 			n, _, err := listener.ReadFromUDP(buffer)
 			if err != nil {
 				log.Printf("Error receiving message: %s\n", err)
@@ -90,7 +90,7 @@ func Client(config *config.AppConfigList) {
 			ClientIp:       listenIp, // this is where the client is waiting for the response
 			Sender:         "client",
 			Target:         target,
-			RequestedVideo: "video",
+			RequestedVideo: "lol.Mjpeg",
 			Content: &protobuf.Header_ClientCommand{
 				ClientCommand: &protobuf.ClientCommand{
 					Command:               protobuf.PlayerCommand_PLAY,

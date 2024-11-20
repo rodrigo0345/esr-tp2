@@ -1,8 +1,12 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -16,15 +20,15 @@ type ServerSystem struct {
 	PresenceSystem *presence.PresenceSystem
 	Logger         *config.Logger
 	VideoStreams   VideoStreams
-  Bootstrapper   *boostrapper.Bootstrapper
+	Bootstrapper   *boostrapper.Bootstrapper
 }
 
 func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 	return &ServerSystem{
 		PresenceSystem: presence.NewPresenceSystem(cnf),
 		Logger:         config.NewLogger(2, cnf.NodeName),
-    Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2, cnf.NodeName)),
-    VideoStreams:   *NewVideoStreams(),
+		Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2, cnf.NodeName)),
+		VideoStreams:   *NewVideoStreams(),
 	}
 }
 
@@ -85,8 +89,8 @@ func (ss *ServerSystem) ListenForClients() {
 
 				case protobuf.RequestType_BOOTSTRAPER:
 
-          ss.Bootstrapper.Bootstrap(session, stream, header)
-          break
+					ss.Bootstrapper.Bootstrap(session, stream, header)
+					break
 
 				case protobuf.RequestType_RETRANSMIT:
 
@@ -128,8 +132,8 @@ func (ss *ServerSystem) ListenForClients() {
 						ss.StopVideoStream(header)
 						break
 					}
-        default:
-          break;
+				default:
+					break
 				}
 
 			}(stream)
@@ -160,44 +164,126 @@ func (ss *ServerSystem) BackgroundStreaming() {
 	for {
 		for _, video := range ss.VideoStreams.Streams {
 
-			header := &protobuf.Header{
-				Sender: ss.PresenceSystem.Config.NodeName,
-				// to be defined
-				Target:         "",
-				RequestedVideo: video.Video,
-				Type:           protobuf.RequestType_RETRANSMIT,
-				// to be determined
-				Length:    0,
-				Timestamp: time.Now().UnixMilli(),
-				Content: &protobuf.Header_ServerVideoChunk{
-					ServerVideoChunk: &protobuf.ServerVideoChunk{
-						Data:           []byte(fmt.Sprintf("Sending video stream for %s", video.Video)),
-						SequenceNumber: 0,
-						Timestamp:      time.Now().UnixMilli(),
-						Format:         protobuf.VideoFormat_MJPEG,
-						IsLastChunk:    false,
-					},
-				},
+      if video == nil {
+        continue
+      }
+
+			pwd := os.Getenv("PWD")
+			fmt.Printf("PWD: %s\n", pwd)
+
+      fmt.Printf("Video: %s\n", video.Video)
+			videoFilePath := fmt.Sprintf("%s/videos/%s", pwd, video.Video)
+      fmt.Printf("Video file path: %s\n", videoFilePath)
+
+			// Start the ffmpeg process to extract frames in a loop
+			cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", videoFilePath, "-f", "image2pipe", "-vcodec", "mjpeg", "-")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				// Handle error
+				continue
 			}
 
-			// TODO: stream video, for now just send a bunch of messages
-			for _, client := range video.Clients {
+			if err := cmd.Start(); err != nil {
+				// Handle error
+				continue
+			}
 
-				sqNumber := 0
-				for len(video.Clients) != 0 {
+			// Create a buffered reader to read frames
+			reader := bufio.NewReader(stdout)
 
-					sqNumber += 1
-					header.Target = client.PresenceNodeName
-					header.ClientIp = client.ClientIP
-					header.Length = int32(len(header.Content.(*protobuf.Header_ServerVideoChunk).ServerVideoChunk.Data))
-					header.GetServerVideoChunk().SequenceNumber = int32(sqNumber)
+			sqNumber := 0
+			for {
+				// Read a frame from the ffmpeg output
+				frameData, err := readFrame(reader)
+				if err != nil {
+					if err == io.EOF {
+						// If the stream ends, restart the loop
+						break
+					}
+					// Handle other errors
+					continue
+				}
 
+				sqNumber += 1
+
+				for _, client := range video.Clients {
+
+					header := &protobuf.Header{
+						Sender:         ss.PresenceSystem.Config.NodeName,
+						Target:         client.PresenceNodeName,
+						ClientIp:       client.ClientIP,
+						RequestedVideo: video.Video,
+						Type:           protobuf.RequestType_RETRANSMIT,
+						Length:         int32(len(frameData)),
+						Timestamp:      time.Now().UnixMilli(),
+						Content: &protobuf.Header_ServerVideoChunk{
+							ServerVideoChunk: &protobuf.ServerVideoChunk{
+								Data:           frameData,
+								SequenceNumber: int32(sqNumber),
+								Timestamp:      time.Now().UnixMilli(),
+								Format:         protobuf.VideoFormat_MJPEG,
+								IsLastChunk:    false,
+							},
+						},
+					}
+
+					// Send the frame to the client
 					ss.sendVideoChunk(header)
 				}
+
+				// Control frame rate (e.g., 30 fps)
+				time.Sleep(time.Millisecond * 33)
 			}
 
+			// Restart the streaming process if it exits
+			cmd.Wait()
 		}
 	}
+}
+
+// Helper function to read a frame from the ffmpeg output
+func readFrame(reader *bufio.Reader) ([]byte, error) {
+	// JPEG SOI and EOI markers
+	const (
+		SOIMarker = 0xFFD8
+		EOIMarker = 0xFFD9
+	)
+
+	var frameData []byte
+
+	// Read until SOI marker is found
+	for {
+		b1, err := reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if b1 == 0xFF {
+			b2, err := reader.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			if b2 == 0xD8 {
+				// Found SOI marker
+				frameData = append(frameData, 0xFF, 0xD8)
+				break
+			}
+		}
+	}
+
+	// Read until EOI marker is found
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		frameData = append(frameData, b)
+		if b == 0xD9 && len(frameData) >= 2 && frameData[len(frameData)-2] == 0xFF {
+			// Found EOI marker
+			break
+		}
+	}
+
+	return frameData, nil
 }
 
 func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {

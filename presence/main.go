@@ -27,14 +27,8 @@ func Presence(cnf *config.AppConfigList) {
   }
 
 	presenceSystem := NewPresenceSystem(cnf)
-
 	go presenceSystem.HeartBeatNeighbors(5)
-
-	// kill clients that dont ping in a while
 	go presenceSystem.HeartBeatClients(5)
-
-	presenceSystem.Logger.Info(fmt.Sprintf("Node is running on %s\n", presenceSystem.Config.NodeIP.String()))
-
 	go presenceSystem.ListenForClients()
 	presenceSystem.ListenForClientsInUDP()
 }
