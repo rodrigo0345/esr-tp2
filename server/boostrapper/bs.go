@@ -25,6 +25,9 @@ func NewBootstrapper(fileName string, logger *config.Logger) *Bootstrapper {
 }
 
 func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, header *protobuf.Header) {
+
+  bs.logger.Info("Received Bootstrapper request.")
+
 	// Read the JSON file
 	data, err := os.ReadFile(bs.fileName)
 	if err != nil {

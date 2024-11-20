@@ -39,6 +39,7 @@ func BSGetNeighbors(cnf *config.AppConfigList, bsAddr *protobuf.Interface) ([]st
   if err != nil {
     return nil, err
   }
+  defer stream.Close()
 
   // wait for the response
   dataRecv, err := config.ReceiveMessage(stream)

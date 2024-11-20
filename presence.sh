@@ -1,7 +1,17 @@
 #!/bin/bash
 
-$name = @1
+# Assign the first positional parameter to the variable 'name'
+name=$1
 
-# This script works for the presence nodes
+# Ensure the 'name' variable is not empty
+if [ -z "$name" ]; then
+  echo "Usage: $0 <node_name>"
+  exit 1
+fi
+
+# Build the project
 make
-./bin/main presence -v 10.0.13.10:4242 -n $name
+
+# Run the main executable with the provided parameters
+./bin/main presence -v 10.0.13.10:4242 -n "$name"
+

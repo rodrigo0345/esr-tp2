@@ -34,7 +34,7 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 	neighborsConnectionsMap := dvr.NewNeighborsConnectionsMap()
 	currentNodeStreams := make(map[string]*NodeList)
 
-	logger := config.NewLogger(2)
+	logger := config.NewLogger(2, cnf.NodeName)
 
 	return &PresenceSystem{
 		RoutingTable:         routingTable,
@@ -50,7 +50,7 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 func (ps *PresenceSystem) HeartBeatNeighbors(seconds int) {
 	for {
 		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Config, ps.RoutingTable, ps.ConnectionPool)
-		ps.RoutingTable.Print()
+    // ps.RoutingTable.Print()
 		time.Sleep(time.Second * time.Duration(seconds))
 	}
 }

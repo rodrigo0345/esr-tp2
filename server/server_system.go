@@ -22,8 +22,8 @@ type ServerSystem struct {
 func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 	return &ServerSystem{
 		PresenceSystem: presence.NewPresenceSystem(cnf),
-		Logger:         config.NewLogger(2),
-    Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2)),
+		Logger:         config.NewLogger(2, cnf.NodeName),
+    Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2, cnf.NodeName)),
 	}
 }
 
@@ -127,6 +127,8 @@ func (ss *ServerSystem) ListenForClients() {
 						ss.StopVideoStream(header)
 						break
 					}
+        default:
+          break;
 				}
 
 			}(stream)
