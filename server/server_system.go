@@ -21,6 +21,12 @@ type ServerSystem struct {
 	Logger         *config.Logger
 	VideoStreams   VideoStreams
 	Bootstrapper   *boostrapper.Bootstrapper
+	StreamNotify   chan StreamNotification
+}
+
+type StreamNotification struct {
+	Action string // "start" or "stop"
+	Video  *Stream
 }
 
 func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
@@ -29,6 +35,7 @@ func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 		Logger:         config.NewLogger(2, cnf.NodeName),
 		Bootstrapper:   boostrapper.NewBootstrapper("./server/boostrapper/nb.json", config.NewLogger(2, cnf.NodeName)),
 		VideoStreams:   *NewVideoStreams(),
+		StreamNotify:   make(chan StreamNotification, 10),
 	}
 }
 
@@ -147,8 +154,10 @@ func (ss *ServerSystem) StartVideoStream(header *protobuf.Header) {
 	ss.Logger.Info(fmt.Sprintf("Starting video stream for %s, requesting %s\n", clientName, videoChoice))
 
 	client := &Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
+	videoStream := ss.VideoStreams.AddStream(videoChoice, client)
 
-	ss.VideoStreams.AddStream(videoChoice, client)
+	// Notify the background routine
+	ss.StreamNotify <- StreamNotification{Action: "start", Video: videoStream}
 }
 
 func (ss *ServerSystem) StopVideoStream(header *protobuf.Header) {
@@ -157,86 +166,100 @@ func (ss *ServerSystem) StopVideoStream(header *protobuf.Header) {
 	ss.Logger.Info(fmt.Sprintf("Stopping video stream for %s, requesting %s\n", clientName, videoChoice))
 
 	client := Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
-	ss.VideoStreams.RemoveStream(videoChoice, client)
+	videoStream := ss.VideoStreams.RemoveStream(videoChoice, client)
+
+	// Notify the background routine
+	if videoStream != nil {
+		ss.StreamNotify <- StreamNotification{Action: "stop", Video: videoStream}
+	}
 }
 
 func (ss *ServerSystem) BackgroundStreaming() {
+	activeStreams := make(map[string]chan struct{}) // To manage active streams and stop signals
+
 	for {
-		for _, video := range ss.VideoStreams.Streams {
+		select {
+		case notification := <-ss.StreamNotify:
+			switch notification.Action {
+			case "start":
+				if _, exists := activeStreams[notification.Video.Video]; !exists {
+					stopChan := make(chan struct{})
+					activeStreams[notification.Video.Video] = stopChan
+					go ss.streamVideo(notification.Video, stopChan)
+				}
+			case "stop":
+				if stopChan, exists := activeStreams[notification.Video.Video]; exists {
+					close(stopChan) // Signal the streaming routine to stop
+					delete(activeStreams, notification.Video.Video)
+				}
+			}
+		}
+	}
+}
 
-      if video == nil {
-        continue
-      }
+func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
+	pwd := os.Getenv("PWD")
+	videoFilePath := fmt.Sprintf("%s/videos/%s", pwd, video.Video)
+	ss.Logger.Info(fmt.Sprintf("Starting stream for video: %s, file path: %s", video.Video, videoFilePath))
 
-			pwd := os.Getenv("PWD")
-			fmt.Printf("PWD: %s\n", pwd)
+	cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", videoFilePath, "-f", "image2pipe", "-vcodec", "mjpeg", "-")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		ss.Logger.Error(fmt.Sprintf("Failed to start ffmpeg process for video %s: %v", video.Video, err))
+		return
+	}
 
-      fmt.Printf("Video: %s\n", video.Video)
-			videoFilePath := fmt.Sprintf("%s/videos/%s", pwd, video.Video)
-      fmt.Printf("Video file path: %s\n", videoFilePath)
+	if err := cmd.Start(); err != nil {
+		ss.Logger.Error(fmt.Sprintf("Failed to execute ffmpeg for video %s: %v", video.Video, err))
+		return
+	}
 
-			// Start the ffmpeg process to extract frames in a loop
-			cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", videoFilePath, "-f", "image2pipe", "-vcodec", "mjpeg", "-")
-			stdout, err := cmd.StdoutPipe()
+	reader := bufio.NewReader(stdout)
+	defer cmd.Wait()
+
+	sqNumber := 0
+
+	for {
+		select {
+		case <-stopChan:
+			ss.Logger.Info(fmt.Sprintf("Stopping stream for video: %s", video.Video))
+			cmd.Process.Kill() // Terminate ffmpeg process
+			return
+		default:
+			frameData, err := readFrame(reader)
 			if err != nil {
-				// Handle error
-				continue
-			}
-
-			if err := cmd.Start(); err != nil {
-				// Handle error
-				continue
-			}
-
-			// Create a buffered reader to read frames
-			reader := bufio.NewReader(stdout)
-
-			sqNumber := 0
-			for {
-				// Read a frame from the ffmpeg output
-				frameData, err := readFrame(reader)
-				if err != nil {
-					if err == io.EOF {
-						// If the stream ends, restart the loop
-						break
-					}
-					// Handle other errors
-					continue
+				if err == io.EOF {
+					ss.Logger.Info(fmt.Sprintf("Stream ended for video %s", video.Video))
+					break
 				}
+				ss.Logger.Error(fmt.Sprintf("Error reading frame for video %s: %v", video.Video, err))
+				continue
+			}
 
-				sqNumber += 1
-
-				for _, client := range video.Clients {
-
-					header := &protobuf.Header{
-						Sender:         ss.PresenceSystem.Config.NodeName,
-						Target:         client.PresenceNodeName,
-						ClientIp:       client.ClientIP,
-						RequestedVideo: video.Video,
-						Type:           protobuf.RequestType_RETRANSMIT,
-						Length:         int32(len(frameData)),
-						Timestamp:      time.Now().UnixMilli(),
-						Content: &protobuf.Header_ServerVideoChunk{
-							ServerVideoChunk: &protobuf.ServerVideoChunk{
-								Data:           frameData,
-								SequenceNumber: int32(sqNumber),
-								Timestamp:      time.Now().UnixMilli(),
-								Format:         protobuf.VideoFormat_MJPEG,
-								IsLastChunk:    false,
-							},
+			sqNumber += 1
+			for _, client := range video.Clients {
+				header := &protobuf.Header{
+					Sender:         ss.PresenceSystem.Config.NodeName,
+					Target:         client.PresenceNodeName,
+					ClientIp:       client.ClientIP,
+					RequestedVideo: video.Video,
+					Type:           protobuf.RequestType_RETRANSMIT,
+					Length:         int32(len(frameData)),
+					Timestamp:      time.Now().UnixMilli(),
+					Content: &protobuf.Header_ServerVideoChunk{
+						ServerVideoChunk: &protobuf.ServerVideoChunk{
+							Data:           frameData,
+							SequenceNumber: int32(sqNumber),
+							Timestamp:      time.Now().UnixMilli(),
+							Format:         protobuf.VideoFormat_MJPEG,
+							IsLastChunk:    false,
 						},
-					}
-
-					// Send the frame to the client
-					ss.sendVideoChunk(header)
+					},
 				}
-
-				// Control frame rate (e.g., 30 fps)
-				time.Sleep(time.Millisecond * 33)
+				go ss.sendVideoChunk(header)
 			}
 
-			// Restart the streaming process if it exits
-			cmd.Wait()
+			time.Sleep(time.Millisecond * 33) // Control frame rate (e.g., 30 FPS)
 		}
 	}
 }

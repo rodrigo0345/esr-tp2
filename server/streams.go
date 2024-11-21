@@ -28,7 +28,7 @@ func NewVideoStreams() *VideoStreams {
 }
 
 // add a new stream to the list
-func (vs *VideoStreams) AddStream(video string, client *Client) {
+func (vs *VideoStreams) AddStream(video string, client *Client) *Stream {
 	vs.mutex.Lock()
 	defer vs.mutex.Unlock()
 
@@ -37,26 +37,32 @@ func (vs *VideoStreams) AddStream(video string, client *Client) {
 		if stream.Video == video {
 			// add the client to the list
 			stream.Clients = append(stream.Clients, client)
-			return
+			return stream
 		}
 	}
-	vs.Streams = append(vs.Streams, &Stream{
-		Video: video,
-		Clients: []*Client{
-			client,
-		},
-	})
+
+  s := Stream{
+    Video: video,
+    Clients: []*Client{
+      client,
+    },
+  }
+	vs.Streams = append(vs.Streams, &s)
+  return &s
 }
 
 // remove a stream from the list
-func (vs *VideoStreams) RemoveStream(video string, client Client) {
+func (vs *VideoStreams) RemoveStream(video string, client Client) *Stream {
 	vs.mutex.Lock()
 	defer vs.mutex.Unlock()
+
+  var s *Stream
 
 	// check if the stream exists
 	for i, stream := range vs.Streams {
 		if stream.Video == video {
 			// Remove the client from the list
+      s = stream
 			newClients := []*Client{}
 			for _, c := range vs.Streams[i].Clients {
 				if c.PresenceNodeName != client.PresenceNodeName {
@@ -74,9 +80,10 @@ func (vs *VideoStreams) RemoveStream(video string, client Client) {
 				stream = nil
 			}
 
-			return // Assuming each video only appears once in the stream list
+      break
 		}
 	}
+  return s
 }
 
 func (vs *VideoStreams) GetStreamClients(video string) []*Client {
