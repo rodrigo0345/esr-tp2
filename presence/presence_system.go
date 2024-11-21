@@ -249,6 +249,12 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			case protobuf.RequestType_RETRANSMIT:
 				videoName := header.RequestedVideo
 
+        // check if the client is already connected to the server
+        if _, exists := ps.CurrentClientStreams[videoName]; exists {
+          ps.Logger.Info(fmt.Sprintf("Client %s is already connected to the server\n", addr))
+          return
+        }
+
 				// add the client to the list
 				ps.CurrentClientStreams[videoName] = &ClientList{}
 				ps.CurrentClientStreams[videoName].Add(config.ToInterface(remoteIp))

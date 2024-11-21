@@ -15,50 +15,45 @@ func HandleRetransmit(ps *PresenceSystem, header *protobuf.Header) {
 		return
 	}
 
-  ps.Logger.Info(fmt.Sprintf("Sending message to %v", nextHop.NextNode))
-
-	// open a connection with nextHop and try to send the message
-	// if it fails, send to another neighbor, and remove it from the list
+	ps.Logger.Info(fmt.Sprintf("Sending message to %v", nextHop.NextNode))
 	neighbor := nextHop.NextNode
-	nextNeighbor := 0
 
-	// propagate the message to the next neighbor
-	for {
-		var msg []byte
-		neighborIp := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
+	var msg []byte
+	neighborIp := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
 
-		if neighbor.Ip == ps.Config.NodeIP.Ip {
-			break
-		}
-
-		neighborStream, _, err := ps.ConnectionPool.GetConnectionStream(neighborIp)
-		// defer config.CloseStream(neighborStream)
-
-		if err != nil {
-			ps.Logger.Error(err.Error())
-			goto fail
-		}
-
-		msg, err = config.MarshalHeader(header)
-		err = config.SendMessage(neighborStream, msg)
-
-		if err != nil {
-			ps.Logger.Error(err.Error())
-			goto fail
-		}
-
-		break
-
-	fail:
-		// try with any other neighbor
-		if len(ps.NeighborList.Content)-1 == nextNeighbor {
-			ps.Logger.Error("No more neighbors to send the message")
-			break
-		}
-		neighbor = ps.NeighborList.Content[nextNeighbor]
-		nextNeighbor++
-		continue
+	if neighbor.Ip == ps.Config.NodeIP.Ip {
+		return
 	}
+
+	neighborStream, conn, err := ps.ConnectionPool.GetConnectionStream(neighborIp)
+	// defer config.CloseStream(neighborStream)
+
+	if err != nil {
+		ps.Logger.Error(err.Error())
+		goto fail
+	}
+
+	msg, err = config.MarshalHeader(header)
+	err = config.SendMessage(neighborStream, msg)
+
+	if err != nil {
+		ps.Logger.Error(err.Error())
+		goto fail
+	}
+	return
+
+fail:
+	// try with any other neighbor, this makes the system propagate repetead messages that should just be dropped
+	// if len(ps.NeighborList.Content)-1 == nextNeighbor {
+	// 	ps.Logger.Error("No more neighbors to send the message")
+	// 	break
+	// }
+	// neighbor = ps.NeighborList.Content[nextNeighbor]
+	// nextNeighbor++
+
+	// TODO: notify the client that the message was not delivered (maybe not)
+	config.CloseStream(neighborStream)
+	config.CloseConnection(conn)
 }
 
 func HandleRetransmitFromClient(ps *PresenceSystem, header *protobuf.Header) {

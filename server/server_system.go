@@ -86,8 +86,6 @@ func (ss *ServerSystem) ListenForClients() {
 					return
 				}
 
-				ss.Logger.Info(fmt.Sprintf("Received message from %s, type %s", header.GetSender(), header.GetType()))
-
 				switch header.Type {
 				case protobuf.RequestType_ROUTINGTABLE:
 

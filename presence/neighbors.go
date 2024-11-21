@@ -40,7 +40,9 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 	results := make(chan *NeighborResult, len(nbl.Content))
 
 	for i := range nbl.Content {
+
 		neighbor := nbl.Content[i]
+
 		wg.Add(1)
 		go func(neighbor *protobuf.Interface) {
 			defer wg.Done()
@@ -50,7 +52,7 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 			// Start a new QUIC connection and stream if it doesn't exist already
 			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
 			if err != nil {
-        logger.Error(fmt.Sprintf("Error starting stream to %s: %v", nb.ToString(), err))
+        // logger.Error(fmt.Sprintf("Error starting stream to %s: %v", nb.ToString(), err))
 				r, err := markNeighborAsDisconnected(dvr, nb)
 				if err != nil {
 					return
