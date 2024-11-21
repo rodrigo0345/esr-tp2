@@ -58,11 +58,11 @@ func Client(config *config.AppConfigList) {
 
 	// Create entry widgets and a button for sending messages
 	messageEntry := widget.NewEntry()
-	messageEntry.SetPlaceHolder("Enter message")
+	messageEntry.SetPlaceHolder("Enter video")
 	targetEntry := widget.NewEntry()
 	targetEntry.SetPlaceHolder("Enter target")
 	sendButton := widget.NewButton("Send", func() {
-		text := messageEntry.Text
+		video := messageEntry.Text
 		target := targetEntry.Text
 
 		message := protobuf.Header{
@@ -73,16 +73,15 @@ func Client(config *config.AppConfigList) {
 			Sender:         "client",
       Path:           config.NodeName,
 			Target:         target,
-			RequestedVideo: "lol.Mjpeg",
+			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
 			Content: &protobuf.Header_ClientCommand{
 				ClientCommand: &protobuf.ClientCommand{
 					Command:               protobuf.PlayerCommand_PLAY,
-					AdditionalInformation: text,
+					AdditionalInformation: "no additional information",
 				},
 			},
 		}
 
-		fmt.Printf("Sending message: %s to %s\n", text, target)
 		message.Length = int32(proto.Size(&message))
 		data, err := proto.Marshal(&message)
 		if err != nil {
