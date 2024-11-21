@@ -53,6 +53,9 @@ func Client(config *config.AppConfigList) {
 	imgCanvas := canvas.NewImageFromImage(nil)
 	imgCanvas.FillMode = canvas.ImageFillContain
 
+	// Create a label to display the msg.Path
+	pathLabel := widget.NewLabel("")
+
 	// Create entry widgets and a button for sending messages
 	messageEntry := widget.NewEntry()
 	messageEntry.SetPlaceHolder("Enter message")
@@ -68,6 +71,7 @@ func Client(config *config.AppConfigList) {
 			Timestamp:      time.Now().UnixMilli(),
 			ClientIp:       listenIp,
 			Sender:         "client",
+      Path:           config.NodeName,
 			Target:         target,
 			RequestedVideo: "lol.Mjpeg",
 			Content: &protobuf.Header_ClientCommand{
@@ -92,20 +96,18 @@ func Client(config *config.AppConfigList) {
 		}
 	})
 
-	controls := container.NewVBox(messageEntry, targetEntry, sendButton)
+	controls := container.NewVBox(messageEntry, targetEntry, sendButton, pathLabel)
 	content := container.NewBorder(nil, controls, nil, nil, imgCanvas)
 
 	myWindow.SetContent(content)
 	myWindow.Resize(fyne.NewSize(640, 480))
 
 	// Run a goroutine to listen for incoming messages
-  fmt.Println("Listening for messages")
+	fmt.Println("Listening for messages")
 	go func() {
 		for {
 			buffer := make([]byte, 65535)
 			n, _, err := listener.ReadFromUDP(buffer)
-
-      fmt.Println(n)
 
 			if err != nil {
 				log.Printf("Error receiving message: %s\n", err)
@@ -122,6 +124,10 @@ func Client(config *config.AppConfigList) {
 			if msg.GetServerVideoChunk() == nil {
 				continue
 			}
+
+			path := msg.Path
+			pathLabel.SetText(fmt.Sprintf("Path: %s", path))
+
 			videoData := msg.GetServerVideoChunk().Data
 
 			// Decode the JPEG data into an image.Image
@@ -141,5 +147,3 @@ func Client(config *config.AppConfigList) {
 
 	myWindow.ShowAndRun()
 }
-
-

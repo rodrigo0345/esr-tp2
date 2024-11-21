@@ -50,7 +50,7 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 func (ps *PresenceSystem) HeartBeatNeighbors(seconds int) {
 	for {
 		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Logger, ps.Config, ps.RoutingTable, ps.ConnectionPool)
-    ps.RoutingTable.Print(ps.Logger)
+		// ps.RoutingTable.Print(ps.Logger)
 		time.Sleep(time.Second * time.Duration(seconds))
 	}
 }
@@ -140,8 +140,11 @@ func (ps *PresenceSystem) ListenForClients() {
 
 			case protobuf.RequestType_RETRANSMIT:
 
-        ps.Logger.Info(fmt.Sprintf("Received message from %s", header.Sender))
+				ps.Logger.Info(fmt.Sprintf("Received message from %s", header.Sender))
 				videoName := header.RequestedVideo
+
+				// add this node name to the path
+				header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
 
 				serverMessage := header.GetServerVideoChunk() != nil
 				clientMessage := header.GetClientCommand() != nil
