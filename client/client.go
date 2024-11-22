@@ -71,7 +71,7 @@ func Client(config *config.AppConfigList) {
 			Timestamp:      time.Now().UnixMilli(),
 			ClientIp:       listenIp,
 			Sender:         "client",
-      Path:           config.NodeName,
+			Path:           config.NodeName,
 			Target:         target,
 			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
 			Content: &protobuf.Header_ClientCommand{
@@ -94,8 +94,41 @@ func Client(config *config.AppConfigList) {
 			log.Printf("Failed to send message: %v", err)
 		}
 	})
+	cancelButton := widget.NewButton("Stop", func() {
+		video := messageEntry.Text
+		target := targetEntry.Text
 
-	controls := container.NewVBox(messageEntry, targetEntry, sendButton, pathLabel)
+		message := protobuf.Header{
+			Type:           protobuf.RequestType_RETRANSMIT,
+			Length:         0,
+			Timestamp:      time.Now().UnixMilli(),
+			ClientIp:       listenIp,
+			Sender:         "client",
+			Path:           config.NodeName,
+			Target:         target,
+			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
+			Content: &protobuf.Header_ClientCommand{
+				ClientCommand: &protobuf.ClientCommand{
+					Command:               protobuf.PlayerCommand_STOP,
+					AdditionalInformation: "no additional information",
+				},
+			},
+		}
+		message.Length = int32(proto.Size(&message))
+		data, err := proto.Marshal(&message)
+		if err != nil {
+			log.Printf("Error in Marshaling message: %v", err)
+			return
+		}
+
+		_, err = conn.Write(data)
+		if err != nil {
+			log.Printf("Failed to send message: %v", err)
+		}
+
+	})
+
+	controls := container.NewVBox(messageEntry, targetEntry, sendButton, cancelButton, pathLabel)
 	content := container.NewBorder(nil, controls, nil, nil, imgCanvas)
 
 	myWindow.SetContent(content)

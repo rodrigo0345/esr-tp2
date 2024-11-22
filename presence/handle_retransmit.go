@@ -2,6 +2,7 @@ package presence
 
 import (
 	"fmt"
+
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 )
@@ -52,6 +53,10 @@ fail:
 	// nextNeighbor++
 
 	// TODO: notify the client that the message was not delivered (maybe not)
+	if conn == nil {
+		return
+	}
+
 	config.CloseStream(neighborStream)
 	config.CloseConnection(conn)
 }

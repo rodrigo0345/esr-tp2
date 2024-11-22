@@ -3,9 +3,10 @@ package presence
 import (
 	"context"
 	"fmt"
-	"google.golang.org/protobuf/proto"
 	"net"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
@@ -249,11 +250,11 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			case protobuf.RequestType_RETRANSMIT:
 				videoName := header.RequestedVideo
 
-        // check if the client is already connected to the server
-        if _, exists := ps.CurrentClientStreams[videoName]; exists {
-          ps.Logger.Info(fmt.Sprintf("Client %s is already connected to the server\n", addr))
-          return
-        }
+				// check if the client is already connected to the server
+				if _, exists := ps.CurrentClientStreams[videoName]; exists {
+					ps.Logger.Info(fmt.Sprintf("Client %s is already connected to the server\n", addr))
+					return
+				}
 
 				// add the client to the list
 				ps.CurrentClientStreams[videoName] = &ClientList{}

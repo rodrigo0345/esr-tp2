@@ -241,7 +241,7 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					Target:         client.PresenceNodeName,
 					ClientIp:       client.ClientIP,
 					RequestedVideo: video.Video,
-          Path:           "s1",
+					Path:           "s1",
 					Type:           protobuf.RequestType_RETRANSMIT,
 					Length:         int32(len(frameData)),
 					Timestamp:      time.Now().UnixMilli(),
