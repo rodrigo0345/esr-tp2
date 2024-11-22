@@ -133,6 +133,9 @@ func (ps *PresenceSystem) ListenForClients() {
 				return
 			}
 
+			videoName := header.RequestedVideo
+			header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
+
 			switch header.Type {
 			case protobuf.RequestType_ROUTINGTABLE:
 
@@ -140,12 +143,6 @@ func (ps *PresenceSystem) ListenForClients() {
 				break
 
 			case protobuf.RequestType_RETRANSMIT:
-
-				ps.Logger.Info(fmt.Sprintf("Received message from %s", header.Sender))
-				videoName := header.RequestedVideo
-
-				// add this node name to the path
-				header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
 
 				serverMessage := header.GetServerVideoChunk() != nil
 				clientMessage := header.GetClientCommand() != nil
@@ -166,8 +163,17 @@ func (ps *PresenceSystem) ListenForClients() {
 
 				// make the nodes know what video they are about to stream
 				if clientMessage && header.RequestedVideo != "" {
-					ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
 					// check if the node is already streaming and just add the client to the list
+          if header.GetClientCommand().Command == protobuf.PlayerCommand_STOP {
+            ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s' to stop\n", header.GetSender(), header.RequestedVideo))
+            // check if the node is already streaming and just add the client to the list
+            if exists := ps.CurrentNodeStreams[header.RequestedVideo]; exists != nil {
+              // now the current stream is going to be streamd to this node too
+              ps.CurrentNodeStreams[header.RequestedVideo].Remove(header.Sender)
+            } 
+          }
+
+					ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
 					if exists := ps.CurrentNodeStreams[header.RequestedVideo]; exists != nil {
 						// now the current stream is going to be streamd to this node too
 
@@ -185,14 +191,12 @@ func (ps *PresenceSystem) ListenForClients() {
 					// streaming
 					video := header.RequestedVideo
 
-					ps.Logger.Info(fmt.Sprintf("Server %s is sending video '%s'\n", header.GetSender(), header.RequestedVideo))
 					if ps.CurrentNodeStreams[video] == nil {
 						break
 					}
 
 					for _, node := range ps.CurrentNodeStreams[video].Content {
 						// send the message to all interested clients
-						ps.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", node.Node))
 						header.Target = node.Node
 						HandleRetransmit(ps, header)
 					}

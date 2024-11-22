@@ -109,12 +109,11 @@ func (ss *ServerSystem) ListenForClients() {
 					}*/
 
 					if header.GetClientCommand() == nil {
-						ss.Logger.Error(fmt.Sprintf("Received message with no client command\n"))
 						return
 					}
 
 					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
-						ss.Logger.Error(fmt.Sprintf("Received message from %s, but target is %s\n", header.GetSender(), header.GetTarget()))
+						// ss.Logger.Error(fmt.Sprintf("Received message from %s, but target is %s\n", header.GetSender(), header.GetTarget()))
 						return
 					}
 					ss.Logger.Info(fmt.Sprintf("Received message %s\n", header.GetClientCommand().AdditionalInformation))
@@ -241,7 +240,7 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					Target:         client.PresenceNodeName,
 					ClientIp:       client.ClientIP,
 					RequestedVideo: video.Video,
-					Path:           "s1",
+					Path:           ss.PresenceSystem.Config.NodeName,
 					Type:           protobuf.RequestType_RETRANSMIT,
 					Length:         int32(len(frameData)),
 					Timestamp:      time.Now().UnixMilli(),
@@ -319,9 +318,7 @@ func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
 
 	// open a connection with nextHop and be persistent trying to send the message
 	neighbor := nextHop.NextNode
-
-	failCount := 0
-	limitFails := 3
+	ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", neighbor.Ip))
 
 	for {
 		var msg []byte
@@ -330,7 +327,7 @@ func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
 		defer config.CloseStream(neighborStream)
 
 		if err != nil {
-			ss.Logger.Error(err.Error())
+			// ss.Logger.Error(err.Error())
 			goto fail
 		}
 
@@ -338,18 +335,12 @@ func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
 		err = config.SendMessage(neighborStream, msg)
 
 		if err != nil {
-			ss.Logger.Error(err.Error())
+			// ss.Logger.Error(err.Error())
 			goto fail
 		}
 
 		break
 
 	fail:
-		failCount += 1
-		if failCount > limitFails {
-			ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s\n", neighborIp))
-			break
-		}
-		continue
 	}
 }

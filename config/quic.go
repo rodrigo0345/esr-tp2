@@ -66,6 +66,9 @@ func CloseStream(stream quic.Stream) {
 
 // CloseConnection closes the given QUIC connection
 func CloseConnection(conn quic.Connection) {
+  if conn == nil {
+    return
+  }
 	if err := conn.CloseWithError(0, "closing connection"); err != nil {
 		log.Printf("Failed to close connection: %v", err)
 	}

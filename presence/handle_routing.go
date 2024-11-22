@@ -26,7 +26,7 @@ func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream,
 		Timestamp: time.Now().UnixMilli(),
 
 		Content: &protobuf.Header_DistanceVectorRouting{
-			DistanceVectorRouting: ps.RoutingTable.Dvr,
+			DistanceVectorRouting: ps.RoutingTable.Copy().Dvr,
 		},
 	}
 
@@ -49,6 +49,7 @@ func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream,
 	}})
 
 	data, err := proto.Marshal(&msg)
+
 	if err != nil {
     ps.Logger.Error(err.Error())
 		return
