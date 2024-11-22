@@ -1,91 +1,181 @@
 package client
 
 import (
-	"context"
-	"crypto/tls"
-	"encoding/binary"
-	"io"
+	"bytes"
+	"fmt"
+	"image/jpeg"
 	"log"
-	"os"
+	"net"
 	"time"
 
-	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
-	"github.com/rodrigo0345/esr-tp2/config/protobuf" // Import your generated protobuf package
+	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"google.golang.org/protobuf/proto"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 )
 
 func Client(config *config.AppConfigList) {
-	// Create a context for the connection
-	ctx := context.Background()
+	// Address to send messages
+	presenceNetworkEntrypointIp := config.Neighbors[0]
+	pneIpString := fmt.Sprintf("%s:%d", presenceNetworkEntrypointIp.Ip, presenceNetworkEntrypointIp.Port)
+	fmt.Println(pneIpString)
 
-	// Dial the QUIC server with the proper signature
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // Skip verification for testing purposes
-		NextProtos:         []string{"quic-echo-example"},
-	}
-	quicConfig := &quic.Config{} // You can configure QUIC settings here, or leave it nil
+	listenIp := "0.0.0.0:2222"
 
-	// Dial the QUIC server
-	session, err := quic.DialAddr(ctx, "localhost:4242", tlsConfig, quicConfig)
+	// Setup a UDP connection for sending
+	conn, err := net.Dial("udp", pneIpString)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Create a UDP listener for incoming messages
+	laddr := net.UDPAddr{
+		Port: 2222,
+		IP:   net.ParseIP(listenIp),
 	}
 
-	// Open a stream to send and receive data
-	stream, err := session.OpenStreamSync(ctx)
+	listener, err := net.ListenUDP("udp", &laddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create UDP listener: %v", err)
 	}
 
-	// Open the video file
-	videoFile, err := os.Open("videos/lol.Mjpeg")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer videoFile.Close()
+	// Create the app and window
+	myApp := app.New()
+	myWindow := myApp.NewWindow("Video Client")
 
-	// Create a buffer to hold chunks of the video
-	buffer := make([]byte, 1024)            // Adjust chunk size as necessary
-	sequenceNumber := 1                     // Initialize sequence number
-	videoFormat := protobuf.VideoFormat_MP4 // Set the video format (adjust accordingly)
+	// Create an image canvas object
+	imgCanvas := canvas.NewImageFromImage(nil)
+	imgCanvas.FillMode = canvas.ImageFillContain
 
-	for {
-		n, err := videoFile.Read(buffer)
-		if err != nil && err != io.EOF {
-			log.Fatal(err)
-		}
-		if n == 0 {
-			break
-		}
+	// Create a label to display the msg.Path
+	pathLabel := widget.NewLabel("")
 
-		videoChunk := &protobuf.VideoChunk{
-			SequenceNumber: int32(sequenceNumber),
+	// Create entry widgets and a button for sending messages
+	messageEntry := widget.NewEntry()
+	messageEntry.SetPlaceHolder("Enter video")
+	targetEntry := widget.NewEntry()
+	targetEntry.SetPlaceHolder("Enter target")
+	sendButton := widget.NewButton("Send", func() {
+		video := messageEntry.Text
+		target := targetEntry.Text
+
+		message := protobuf.Header{
+			Type:           protobuf.RequestType_RETRANSMIT,
+			Length:         0,
 			Timestamp:      time.Now().UnixMilli(),
-			Format:         videoFormat,
-			Data:           buffer[:n],
-			IsLastChunk:    false,
+			ClientIp:       listenIp,
+			Sender:         "client",
+			Path:           config.NodeName,
+			Target:         target,
+			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
+			Content: &protobuf.Header_ClientCommand{
+				ClientCommand: &protobuf.ClientCommand{
+					Command:               protobuf.PlayerCommand_PLAY,
+					AdditionalInformation: "no additional information",
+				},
+			},
 		}
 
-		serializedChunk, err := proto.Marshal(videoChunk)
+		message.Length = int32(proto.Size(&message))
+		data, err := proto.Marshal(&message)
 		if err != nil {
-			log.Fatal("Failed to serialize chunk:", err)
+			log.Printf("Error marshaling message: %v", err)
+			return
 		}
 
-		// Send the length of the message first
-		lengthPrefix := make([]byte, 4)
-		binary.BigEndian.PutUint32(lengthPrefix, uint32(len(serializedChunk)))
-
-		// Send the length prefix followed by the serialized chunk
-		_, err = stream.Write(lengthPrefix)
+		_, err = conn.Write(data)
 		if err != nil {
-			log.Fatal("Failed to send length prefix:", err)
+			log.Printf("Failed to send message: %v", err)
 		}
-		_, err = stream.Write(serializedChunk)
+	})
+	cancelButton := widget.NewButton("Stop", func() {
+		video := messageEntry.Text
+		target := targetEntry.Text
+
+		message := protobuf.Header{
+			Type:           protobuf.RequestType_RETRANSMIT,
+			Length:         0,
+			Timestamp:      time.Now().UnixMilli(),
+			ClientIp:       listenIp,
+			Sender:         "client",
+			Path:           config.NodeName,
+			Target:         target,
+			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
+			Content: &protobuf.Header_ClientCommand{
+				ClientCommand: &protobuf.ClientCommand{
+					Command:               protobuf.PlayerCommand_STOP,
+					AdditionalInformation: "no additional information",
+				},
+			},
+		}
+		message.Length = int32(proto.Size(&message))
+		data, err := proto.Marshal(&message)
 		if err != nil {
-			log.Fatal("Failed to send chunk:", err)
+			log.Printf("Error in Marshaling message: %v", err)
+			return
 		}
 
-		sequenceNumber++
-	}
+		_, err = conn.Write(data)
+		if err != nil {
+			log.Printf("Failed to send message: %v", err)
+		}
+
+	})
+
+	controls := container.NewVBox(messageEntry, targetEntry, sendButton, cancelButton, pathLabel)
+	content := container.NewBorder(nil, controls, nil, nil, imgCanvas)
+
+	myWindow.SetContent(content)
+	myWindow.Resize(fyne.NewSize(640, 480))
+
+	// Run a goroutine to listen for incoming messages
+	fmt.Println("Listening for messages")
+	go func() {
+		for {
+			buffer := make([]byte, 65535)
+			n, _, err := listener.ReadFromUDP(buffer)
+
+			if err != nil {
+				log.Printf("Error receiving message: %s\n", err)
+				continue
+			}
+
+			var msg protobuf.Header
+			err = proto.Unmarshal(buffer[:n], &msg)
+			if err != nil {
+				log.Printf("Error unmarshaling message: %s\n", err)
+				continue
+			}
+
+			if msg.GetServerVideoChunk() == nil {
+				continue
+			}
+
+			path := msg.Path
+			pathLabel.SetText(fmt.Sprintf("Path: %s", path))
+
+			videoData := msg.GetServerVideoChunk().Data
+
+			// Decode the JPEG data into an image.Image
+			imgReader := bytes.NewReader(videoData)
+			frame, err := jpeg.Decode(imgReader)
+			if err != nil {
+				log.Printf("Error decoding JPEG: %s\n", err)
+				continue
+			}
+
+			// Update the image canvas with the new frame
+			frameCopy := frame // Create a copy to avoid concurrency issues
+			imgCanvas.Image = frameCopy
+			imgCanvas.Refresh()
+		}
+	}()
+
+	myWindow.ShowAndRun()
 }

@@ -1,64 +1,34 @@
 package presence
 
 import (
+	_ "encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/rodrigo0345/esr-tp2/config"
-	"github.com/rodrigo0345/esr-tp2/config/send_message"
-	"google.golang.org/protobuf/proto"
+	"github.com/rodrigo0345/esr-tp2/config/protobuf"
+	"github.com/rodrigo0345/esr-tp2/presence/bootstrapper"
 )
 
-type NeighborList struct {
-	content []Interface
-}
+func Presence(cnf *config.AppConfigList) {
 
-func Presence(config *config.AppConfigList) {
-	// identify and alert neighbors
-	neighborList := PingNeighbors(config)
+  // Boostrap the neighbors
+  NeighborList, err := bootstrapper.BSGetNeighbors(cnf, cnf.Neighbors[0])
 
-	fmt.Printf("Node is running on %s\n", config.ServerUrl.Url)
-	MainListen(config, &neighborList)
+  if err != nil {
+    fmt.Printf("Error getting neighbors: %s\n", err.Error())
+    return
+  }
 
-	// create a table of ips with the best interface for a given source
-	// from time to time, update the table by trying to ping each source
-	// in this message, send the
-	// {
-	//   "workingRoute": ["127.0.0.1"],
-	//   "visited": [""]
-	//   "target": "127.0.0.1:4005"
-	// }
-	//
-	// once the message reaches the server, the server will send a message to the client
-	// with the time it took to reach the target
+  cnf.Neighbors = []*protobuf.Interface{}
+  for _, neighbor := range NeighborList {
+    fmt.Printf("Neighbor: %s\n", neighbor)
+    nb := config.ToInterface(neighbor)
+    cnf.Neighbors = append(cnf.Neighbors, nb)
+  }
 
-}
-
-func MainListen(cnf *config.AppConfigList, neighborList *NeighborList) {
-	msg := config.ReceiveMessage(*cnf.NodeIp)
-	// Unmarshal message
-	var message send_message.Message
-	err := proto.Unmarshal(msg, &message)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("Received message: %s\n", msg)
-
-	switch message.Type {
-	case send_message.TypeInteraction_FAILED:
-		break
-	case send_message.TypeInteraction_IS_ALIVE:
-		break
-	case send_message.TypeInteraction_NEIGHBOR:
-		// TODO add the new neighbor to the neighbor list
-		neighborList.AddNeighbor(&Interface{
-			Ip:   message.Content,
-			Port: 4242,
-		})
-		break
-	case send_message.TypeInteraction_TRANSMITION:
-		break
-	}
-
+	presenceSystem := NewPresenceSystem(cnf)
+	go presenceSystem.HeartBeatNeighbors(1)
+	go presenceSystem.HeartBeatClients(50)
+	go presenceSystem.ListenForClients()
+	presenceSystem.ListenForClientsInUDP()
 }
