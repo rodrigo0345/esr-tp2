@@ -63,7 +63,7 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 
 			msg.Target = nb.ToString()
 			msg.Content = &protobuf.Header_DistanceVectorRouting{
-				DistanceVectorRouting: dvr.Dvr,
+				DistanceVectorRouting: dvr.Copy().Dvr,
 			}
 
 			data, err := proto.Marshal(&msg)

@@ -15,7 +15,6 @@ func HandleRetransmit(ps *PresenceSystem, header *protobuf.Header) {
 		return
 	}
 
-	ps.Logger.Info(fmt.Sprintf("Sending message to %v", nextHop.NextNode))
 	neighbor := nextHop.NextNode
 
 	var msg []byte
@@ -43,15 +42,6 @@ func HandleRetransmit(ps *PresenceSystem, header *protobuf.Header) {
 	return
 
 fail:
-	// try with any other neighbor, this makes the system propagate repetead messages that should just be dropped
-	// if len(ps.NeighborList.Content)-1 == nextNeighbor {
-	// 	ps.Logger.Error("No more neighbors to send the message")
-	// 	break
-	// }
-	// neighbor = ps.NeighborList.Content[nextNeighbor]
-	// nextNeighbor++
-
-	// TODO: notify the client that the message was not delivered (maybe not)
 	config.CloseStream(neighborStream)
 	config.CloseConnection(conn)
 }

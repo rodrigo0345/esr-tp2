@@ -36,6 +36,29 @@ func (dvr *DistanceVectorRouting) Unlock() {
 	dvr.Mutex.Unlock()
 }
 
+func (dvr *DistanceVectorRouting) Copy() *DistanceVectorRouting {
+	dvr.Mutex.Lock()
+	defer dvr.Mutex.Unlock()
+
+	// Initialize the copy
+	dvrCopy := &DistanceVectorRouting{
+		Dvr: &protobuf.DistanceVectorRouting{
+			Entries: make(map[string]*protobuf.NextHop),
+			Source:  dvr.Dvr.Source,
+		},
+		Mutex: sync.RWMutex{}, // New mutex for the copy
+	}
+
+	// Deep copy the entries (assumes values are not pointers or need deep copy logic)
+	for key, value := range dvr.Dvr.Entries {
+		// If value is a complex type, implement deep copy logic here if needed
+		dvrCopy.Dvr.Entries[key] = value
+	}
+
+	return dvrCopy
+}
+
+
 // make a path to itself
 func CreateDistanceVectorRouting(cnfg *config.AppConfigList) *DistanceVectorRouting {
 	thisAddress := Interface{cnfg.NodeIP}
@@ -150,6 +173,8 @@ func (dvr *DistanceVectorRouting) Remove(dest Interface) {
 }
 
 func (dvr *DistanceVectorRouting) UpdateSource(source Interface) {
+	dvr.Lock()
+	defer dvr.Unlock()
 	dvr.Dvr.Source = source.Interface
 }
 
@@ -193,7 +218,7 @@ func (dvr *DistanceVectorRouting) Unmarshal(data []byte) error {
 }
 
 func (dvr *DistanceVectorRouting) Print(logger *config.Logger) {
-  logger.Info("Routing Table:")
+	logger.Info("Routing Table:")
 
 	// Coletar as entradas em uma slice para classificação
 	entries := make([]string, 0, len(dvr.Dvr.Entries))
@@ -207,6 +232,6 @@ func (dvr *DistanceVectorRouting) Print(logger *config.Logger) {
 	// Imprimir a tabela de roteamento ordenada
 	for _, dest := range entries {
 		nextHop := dvr.Dvr.Entries[dest]
-    logger.Info(fmt.Sprintf("%s | %d | %s", dest, nextHop.Distance, Interface{nextHop.NextNode}.ToString()))
+		logger.Info(fmt.Sprintf("%s | %d | %s", dest, nextHop.Distance, Interface{nextHop.NextNode}.ToString()))
 	}
 }
