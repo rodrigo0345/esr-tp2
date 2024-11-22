@@ -255,7 +255,9 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 				videoName := header.RequestedVideo
 
 				// check if the client is already connected to the server
-				if _, exists := ps.CurrentClientStreams[videoName]; exists {
+        isRequestingPlay := header.GetClientCommand().Command == protobuf.PlayerCommand_PLAY
+
+				if _, exists := ps.CurrentClientStreams[videoName]; exists && isRequestingPlay {
 					ps.Logger.Info(fmt.Sprintf("Client %s is already connected to the server\n", addr))
 					return
 				}
