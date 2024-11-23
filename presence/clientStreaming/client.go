@@ -12,7 +12,6 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 
 	mine := isMessageForMe(header, ss.Config.NodeName)
 
-  ss.Logger.Info("Message is not for me")
 	if !mine {
 		callback <- CallbackData{
 			Header: header,

@@ -36,7 +36,7 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 	logger := config.NewLogger(2, cnf.NodeName)
 
 	streamingService := clientStreaming.NewStreamingService(cnf, logger)
-	streamingService.RunBackgroundRoutine(5)
+	streamingService.RunBackgroundRoutine(120)
 
 	transmissionService := transmitions.NewTransmissionService(logger, cnf)
 
@@ -139,10 +139,9 @@ func (ps *PresenceSystem) ListenForClients() {
 				case data := <-callback:
 					// not for us so, send to another neighbor
 					if data.Cancel {
-						ps.Logger.Info(fmt.Sprintf("Forwarding request from %s", header.GetSender()))
 						ps.TransmitionService.SendPacket(header, ps.RoutingTable)
 					} else {
-						ps.Logger.Info(fmt.Sprintf("Reached the client"))
+            // do nothing
 					}
 				}
 

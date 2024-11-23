@@ -36,7 +36,6 @@ func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.Dista
 			continue
 		}
 
-    ts.Logger.Debug(fmt.Sprintf("Sending packet to %s\n", node.Ip))
 		neighborIp := fmt.Sprintf("%s:%d", node.Ip, node.Port)
 		data, err := proto.Marshal(packet)
 
