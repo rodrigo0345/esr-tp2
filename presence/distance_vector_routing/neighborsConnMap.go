@@ -66,36 +66,42 @@ func (nm *ConnectionPool) GetConnectionStream(address string) (quic.Stream, quic
 	var stream quic.Stream
 	var conn quic.Connection
 	var err error
-	// var ok bool = false
+	var ok bool = false
 
-  stream, conn, err = config.StartConnStream(address)
-  return stream, conn, err
+  // stream, conn, err = config.StartConnStream(address)
+  // return stream, conn, err
 
-	// nm.Mutex.RLock()
-	// if _, ok := nm.Connections[address]; ok {
-	// 	conn := nm.Connections[address]
-	// 	stream, _ = config.CreateStream(conn)
-	// 	// check if the connection is still alive
-	// 	ok = config.IsConnectionOpen(stream)
-	// 	if !ok {
-	// 		config.CloseStream(stream)
-	// 		config.CloseConnection(conn)
-	// 	}
-	// }
-	// nm.Mutex.RUnlock()
+	nm.Mutex.RLock()
+	if _, ok := nm.Connections[address]; ok {
+		conn := nm.Connections[address]
+    isConnOpen := config.IsConnectionOpen(conn)
+    if !isConnOpen {
+      config.CloseConnection(conn)
+      ok = false
+    } else {
+      stream, _ = config.CreateStream(conn)
+      // check if the connection is still alive
+      ok = config.IsStreamOpen(stream)
+      if !ok {
+        config.CloseStream(stream)
+        config.CloseConnection(conn)
+      }
+    }
+	}
+	nm.Mutex.RUnlock()
 
-	// if !ok {
-	// 	// create a new connection
-	// 	stream, conn, err = config.StartConnStream(address)
-	// 	if err != nil {
-	// 		nm.Remove(address)
-	// 		return nil, nil, err
-	// 	}
+	if !ok {
+		// create a new connection
+		stream, conn, err = config.StartConnStream(address)
+		if err != nil {
+			nm.Remove(address)
+			return nil, nil, err
+		}
 
-	// 	// add the connection to the map
-	// 	nm.Add(address, conn)
-	// }
+		// add the connection to the map
+		nm.Add(address, conn)
+	}
 
-	// // create a new connection
-	// return stream, conn, nil
+	// create a new connection
+	return stream, conn, nil
 }

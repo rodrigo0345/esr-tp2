@@ -10,7 +10,7 @@ import (
 
 func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Header) {
 
-	mine := isMessageForMe(header, ss.Config.NodeName)
+	mine := hasMessageForMe(header, ss.Config.NodeName)
 
 	if !mine {
 		callback <- CallbackData{
@@ -21,6 +21,7 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 	}
 
 	video := header.RequestedVideo
+  otherNodesNeedThisPacket := len(header.GetTarget()) > 1
 
 	for _, client := range ss.UdpClients[Video(video)] {
 		data, err := proto.Marshal(header)
@@ -30,16 +31,16 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 		}
 
     udpAddr := fmt.Sprintf("%s:%d", client.Ip, client.Port)
-		SendViaUDP(data, udpAddr)
+		go SendViaUDP(data, udpAddr)
 	}
 
 	callback <- CallbackData{
 		Header: header,
-		Cancel: false,
+		Cancel: otherNodesNeedThisPacket,
 	}
 }
 
-func isMessageForMe(header *protobuf.Header, nodeName string) bool {
+func hasMessageForMe(header *protobuf.Header, nodeName string) bool {
 	target := header.GetTarget()
 
 	for _, t := range target {

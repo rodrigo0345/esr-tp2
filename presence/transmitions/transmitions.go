@@ -44,23 +44,21 @@ func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.Dista
 			continue
 		}
 
-		sendData(ts, data, neighborIp)
+		go sendData(data, neighborIp)
 	}
 	return true
 }
 
-func sendData(ts *TransmissionService, data []byte, clientIp string) {
+func sendData(data []byte, clientIp string) {
 
 	neighborStream, conn, err := config.StartConnStream(clientIp)
 	if err != nil {
-		ts.Logger.Error(err.Error())
 		goto fail
 	}
 
 	err = config.SendMessage(neighborStream, data)
 
 	if err != nil {
-		ts.Logger.Error(err.Error())
 		goto fail
 	}
 	return

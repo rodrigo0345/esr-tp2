@@ -26,6 +26,7 @@ message Header {
   // coloquei no header para n ter de haver tanto processamento de header e body
   string RequestedVideo = 10;
   string path = 12;
+  int64 seq_id = 13;
 }
 
 enum RequestType {

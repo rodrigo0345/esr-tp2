@@ -78,6 +78,8 @@ func (ss *ServerSystem) ListenForClients() {
 					return
 				}
 
+        ss.Logger.Info(fmt.Sprintf("Received message \n"))
+
 				// unmarshal protobuf
 				header, err := config.UnmarshalHeader(msg)
 
@@ -113,8 +115,8 @@ func (ss *ServerSystem) ListenForClients() {
 					}
 
 					// this specifies where the message needs to go
-          sender := make([]string, 1)
-          sender[0] = header.Sender
+					sender := make([]string, 1)
+					sender[0] = header.Sender
 					header.Target = sender
 					header.Sender = ss.PresenceSystem.Config.NodeName
 					stream.Close()
@@ -193,75 +195,84 @@ func (ss *ServerSystem) BackgroundStreaming() {
 func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 	pwd := os.Getenv("PWD")
 	videoFilePath := fmt.Sprintf("%s/videos/%s", pwd, video.Video)
+
 	ss.Logger.Info(fmt.Sprintf("Starting stream for video: %s, file path: %s", video.Video, videoFilePath))
 
-	cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", videoFilePath, "-f", "image2pipe", "-vcodec", "mjpeg", "-")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		ss.Logger.Error(fmt.Sprintf("Failed to start ffmpeg process for video %s: %v", video.Video, err))
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
-		ss.Logger.Error(fmt.Sprintf("Failed to execute ffmpeg for video %s: %v", video.Video, err))
-		return
-	}
-
-	reader := bufio.NewReader(stdout)
-	defer cmd.Wait()
-
-	sqNumber := 0
-
 	for {
-		select {
-		case <-stopChan:
-			cmd.Process.Kill() // Terminate ffmpeg process
+		cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", videoFilePath, "-f", "image2pipe", "-vcodec", "mjpeg", "-")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			ss.Logger.Error(fmt.Sprintf("Failed to start ffmpeg process for video %s: %v", video.Video, err))
 			return
-		default:
-			frameData, err := readFrame(reader)
-			if err != nil {
-				if err == io.EOF {
-					ss.Logger.Info(fmt.Sprintf("Stream ended for video %s", video.Video))
-					break
-				}
-				ss.Logger.Error(fmt.Sprintf("Error reading frame for video %s: %v", video.Video, err))
-				continue
-			}
-
-			sqNumber += 1
-      var targets []string
-			for _, client := range video.Clients {
-        targets = append(targets, client.PresenceNodeName)
-			}
-
-      ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", targets))
-
-      header := &protobuf.Header{
-        Sender:         ss.PresenceSystem.Config.NodeName,
-        Target:         targets,
-        RequestedVideo: video.Video,
-        Path:           ss.PresenceSystem.Config.NodeName,
-        Type:           protobuf.RequestType_RETRANSMIT,
-        Length:         int32(len(frameData)),
-        Timestamp:      time.Now().UnixMilli(),
-        Content: &protobuf.Header_ServerVideoChunk{
-          ServerVideoChunk: &protobuf.ServerVideoChunk{
-            Data:           frameData,
-            SequenceNumber: int32(sqNumber),
-            Timestamp:      time.Now().UnixMilli(),
-            Format:         protobuf.VideoFormat_MJPEG,
-            IsLastChunk:    false,
-          },
-        },
-      }
-      success := ss.PresenceSystem.TransmitionService.SendPacket(header, ss.PresenceSystem.RoutingTable)
-
-      if !success {
-        ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s", header.GetSender()))
-      }
-
-			time.Sleep(time.Millisecond * 33) // Control frame rate (e.g., 60 FPS)
 		}
+
+		if err := cmd.Start(); err != nil {
+			ss.Logger.Error(fmt.Sprintf("Failed to execute ffmpeg for video %s: %v", video.Video, err))
+			return
+		}
+
+		reader := bufio.NewReader(stdout)
+		defer cmd.Wait()
+
+		sqNumber := 0
+
+		for {
+			select {
+			case <-stopChan:
+				cmd.Process.Kill() // Terminate ffmpeg process
+				ss.Logger.Info(fmt.Sprintf("Stream stopped for video %s", video.Video))
+				return
+			default:
+				frameData, err := readFrame(reader)
+				if err != nil {
+					if err == io.EOF {
+						ss.Logger.Info(fmt.Sprintf("End of video stream for video %s, restarting loop...", video.Video))
+						break // Exit the loop and restart ffmpeg
+					}
+					ss.Logger.Error(fmt.Sprintf("Error reading frame for video %s: %v", video.Video, err))
+					continue
+				}
+
+				sqNumber += 1
+				var targets []string
+				for _, client := range video.Clients {
+					targets = append(targets, client.PresenceNodeName)
+				}
+
+				ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", targets))
+
+				header := &protobuf.Header{
+					Sender:         ss.PresenceSystem.Config.NodeName,
+					Target:         targets,
+					RequestedVideo: video.Video,
+					Path:           ss.PresenceSystem.Config.NodeName,
+					Type:           protobuf.RequestType_RETRANSMIT,
+					Length:         int32(len(frameData)),
+					Timestamp:      time.Now().UnixMilli(),
+					Content: &protobuf.Header_ServerVideoChunk{
+						ServerVideoChunk: &protobuf.ServerVideoChunk{
+							Data:           frameData,
+							SequenceNumber: int32(sqNumber),
+							Timestamp:      time.Now().UnixMilli(),
+							Format:         protobuf.VideoFormat_MJPEG,
+							IsLastChunk:    false,
+						},
+					},
+				}
+				success := ss.PresenceSystem.TransmitionService.SendPacket(header, ss.PresenceSystem.RoutingTable)
+
+				if !success {
+					ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s", header.GetSender()))
+				}
+
+				// Sleep to control frame rate (e.g., 30 FPS)
+				time.Sleep(time.Millisecond * 33)
+			}
+		}
+
+		// Properly stop ffmpeg if we break out of the loop
+		cmd.Process.Kill()
+		cmd.Wait()
 	}
 }
 
@@ -309,4 +320,3 @@ func readFrame(reader *bufio.Reader) ([]byte, error) {
 
 	return frameData, nil
 }
-
