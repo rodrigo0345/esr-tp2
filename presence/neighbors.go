@@ -27,7 +27,7 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 		Length:    0,
 		Timestamp: time.Now().UnixMilli(),
 		Sender:    cnf.NodeIP.String(),
-		Target:    "",
+		Target:    make([]string, 0),
 	}
 	msg.Length = int32(proto.Size(&msg))
 
@@ -60,8 +60,11 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 				results <- r
 				return
 			}
+      
+      target := make([]string, 1)
+      target[0] = nb.ToString()
 
-			msg.Target = nb.ToString()
+			msg.Target = target
 			msg.Content = &protobuf.Header_DistanceVectorRouting{
 				DistanceVectorRouting: dvr.Copy().Dvr,
 			}

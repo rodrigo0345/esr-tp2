@@ -20,6 +20,7 @@ var (
 	specificIP = flag.String("s", "0.0.0.0:4242", "Specify an IP and port to bind to, default is 0.0.0.0:4242")
 	neighbors  = flag.String("v", "", "Comma-separated list of neighbors in the format ip:port")
 	debugMode  = flag.Bool("d", false, "Turn on debug mode")
+  local      = flag.Bool("l", false, "Run the server locally")
 )
 
 func commandParser(command []string) (*config.AppConfigList, error) {
@@ -116,6 +117,7 @@ func main() {
 		instConfig.NodeIP = &su
 	}
 	instConfig.NodeName = *nodeName
+  instConfig.Local = *local
 
 	// Debug mode
 	if *debugMode {

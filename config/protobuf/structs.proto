@@ -10,7 +10,7 @@ package video;
 
 message Header {
   string sender = 1;
-  string target = 2;
+  repeated string target = 2;
   RequestType type = 3;
   int32 length = 4;
   int64 timestamp = 5;
@@ -22,7 +22,7 @@ message Header {
     BootstraperResult bootstraper_result = 11;
   }
 
-  string client_ip = 9;
+  string client_port = 9;
   // coloquei no header para n ter de haver tanto processamento de header e body
   string RequestedVideo = 10;
   string path = 12;

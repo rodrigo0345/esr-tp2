@@ -112,19 +112,16 @@ func (ss *ServerSystem) ListenForClients() {
 						return
 					}
 
-					if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
-						// ss.Logger.Error(fmt.Sprintf("Received message from %s, but target is %s\n", header.GetSender(), header.GetTarget()))
-						return
-					}
-					ss.Logger.Info(fmt.Sprintf("Received message %s\n", header.GetClientCommand().AdditionalInformation))
-
 					// this specifies where the message needs to go
-					header.Target = header.Sender
+          sender := make([]string, 1)
+          sender[0] = header.Sender
+					header.Target = sender
 					header.Sender = ss.PresenceSystem.Config.NodeName
 					stream.Close()
 
 					switch header.GetClientCommand().Command {
 					case protobuf.PlayerCommand_PLAY:
+						ss.Logger.Info("Starting video stream")
 						ss.StartVideoStream(header)
 						break
 					case protobuf.PlayerCommand_STOP:
@@ -147,10 +144,10 @@ func (ss *ServerSystem) ListenForClients() {
 
 func (ss *ServerSystem) StartVideoStream(header *protobuf.Header) {
 	videoChoice := header.RequestedVideo
-	clientName := header.GetTarget()
+	clientName := header.GetTarget()[0]
 	ss.Logger.Info(fmt.Sprintf("Starting video stream for %s, requesting %s\n", clientName, videoChoice))
 
-	client := &Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
+	client := &Client{PresenceNodeName: clientName, ClientIP: header.GetSender()}
 	videoStream := ss.VideoStreams.AddStream(videoChoice, client)
 
 	// Notify the background routine
@@ -159,11 +156,10 @@ func (ss *ServerSystem) StartVideoStream(header *protobuf.Header) {
 
 func (ss *ServerSystem) StopVideoStream(header *protobuf.Header) {
 	videoChoice := header.RequestedVideo
-	clientName := header.GetTarget()
-	ss.Logger.Info(fmt.Sprintf("Stopping video stream for %s, requesting %s\n", clientName, videoChoice))
+	clientName := header.GetTarget()[0]
 
-	client := Client{PresenceNodeName: clientName, ClientIP: header.ClientIp}
-	videoStream := ss.VideoStreams.RemoveStream(videoChoice, client)
+	client := &Client{PresenceNodeName: clientName, ClientIP: header.GetSender()}
+	videoStream := ss.VideoStreams.RemoveStream(videoChoice, *client)
 
 	// Notify the background routine
 	if videoStream != nil {
@@ -219,7 +215,6 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 	for {
 		select {
 		case <-stopChan:
-			ss.Logger.Info(fmt.Sprintf("Stopping stream for video: %s", video.Video))
 			cmd.Process.Kill() // Terminate ffmpeg process
 			return
 		default:
@@ -234,30 +229,34 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 			}
 
 			sqNumber += 1
+      var targets []string
 			for _, client := range video.Clients {
-				header := &protobuf.Header{
-					Sender:         ss.PresenceSystem.Config.NodeName,
-					Target:         client.PresenceNodeName,
-					ClientIp:       client.ClientIP,
-					RequestedVideo: video.Video,
-					Path:           ss.PresenceSystem.Config.NodeName,
-					Type:           protobuf.RequestType_RETRANSMIT,
-					Length:         int32(len(frameData)),
-					Timestamp:      time.Now().UnixMilli(),
-					Content: &protobuf.Header_ServerVideoChunk{
-						ServerVideoChunk: &protobuf.ServerVideoChunk{
-							Data:           frameData,
-							SequenceNumber: int32(sqNumber),
-							Timestamp:      time.Now().UnixMilli(),
-							Format:         protobuf.VideoFormat_MJPEG,
-							IsLastChunk:    false,
-						},
-					},
-				}
-				go ss.sendVideoChunk(header)
+        targets = append(targets, client.PresenceNodeName)
 			}
 
-			time.Sleep(time.Millisecond * 33) // Control frame rate (e.g., 30 FPS)
+      ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", targets))
+
+      header := &protobuf.Header{
+        Sender:         ss.PresenceSystem.Config.NodeName,
+        Target:         targets,
+        RequestedVideo: video.Video,
+        Path:           ss.PresenceSystem.Config.NodeName,
+        Type:           protobuf.RequestType_RETRANSMIT,
+        Length:         int32(len(frameData)),
+        Timestamp:      time.Now().UnixMilli(),
+        Content: &protobuf.Header_ServerVideoChunk{
+          ServerVideoChunk: &protobuf.ServerVideoChunk{
+            Data:           frameData,
+            SequenceNumber: int32(sqNumber),
+            Timestamp:      time.Now().UnixMilli(),
+            Format:         protobuf.VideoFormat_MJPEG,
+            IsLastChunk:    false,
+          },
+        },
+      }
+      ss.PresenceSystem.TransmitionService.SendPacket(header, ss.PresenceSystem.RoutingTable)
+
+			time.Sleep(time.Millisecond * 33) // Control frame rate (e.g., 60 FPS)
 		}
 	}
 }
@@ -307,40 +306,3 @@ func readFrame(reader *bufio.Reader) ([]byte, error) {
 	return frameData, nil
 }
 
-func (ss *ServerSystem) sendVideoChunk(header *protobuf.Header) {
-	target := header.GetTarget()
-
-	nextHop, err := ss.PresenceSystem.RoutingTable.GetNextHop(target)
-	if err != nil {
-		ss.Logger.Error(err.Error())
-		return
-	}
-
-	// open a connection with nextHop and be persistent trying to send the message
-	neighbor := nextHop.NextNode
-	ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", neighbor.Ip))
-
-	for {
-		var msg []byte
-		neighborIp := fmt.Sprintf("%s:%d", neighbor.Ip, neighbor.Port)
-		neighborStream, _, err := ss.PresenceSystem.ConnectionPool.GetConnectionStream(neighborIp)
-		defer config.CloseStream(neighborStream)
-
-		if err != nil {
-			// ss.Logger.Error(err.Error())
-			goto fail
-		}
-
-		msg, err = config.MarshalHeader(header)
-		err = config.SendMessage(neighborStream, msg)
-
-		if err != nil {
-			// ss.Logger.Error(err.Error())
-			goto fail
-		}
-
-		break
-
-	fail:
-	}
-}

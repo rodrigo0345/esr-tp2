@@ -30,6 +30,7 @@ type AppConfigList struct {
 	Neighbors []*protobuf.Interface
 	NodeIP    *protobuf.Interface
 	NodeName  string
+  Local     bool
 }
 
 // ToInterface converts a string address (ip:port) into a protobuf.Interface.

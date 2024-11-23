@@ -65,14 +65,17 @@ func Client(config *config.AppConfigList) {
 		video := messageEntry.Text
 		target := targetEntry.Text
 
+    targets := make([]string, 1)
+    targets[0] = target
+
 		message := protobuf.Header{
 			Type:           protobuf.RequestType_RETRANSMIT,
 			Length:         0,
 			Timestamp:      time.Now().UnixMilli(),
-			ClientIp:       listenIp,
 			Sender:         "client",
 			Path:           config.NodeName,
-			Target:         target,
+			Target:         targets,
+      ClientPort:     string(config.NodeIP.Port),
 			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
 			Content: &protobuf.Header_ClientCommand{
 				ClientCommand: &protobuf.ClientCommand{
@@ -98,14 +101,16 @@ func Client(config *config.AppConfigList) {
 		video := messageEntry.Text
 		target := targetEntry.Text
 
+    targets := make([]string, 1)
+    targets[0] = target
+
 		message := protobuf.Header{
 			Type:           protobuf.RequestType_RETRANSMIT,
 			Length:         0,
 			Timestamp:      time.Now().UnixMilli(),
-			ClientIp:       listenIp,
 			Sender:         "client",
 			Path:           config.NodeName,
-			Target:         target,
+			Target:         targets,
 			RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
 			Content: &protobuf.Header_ClientCommand{
 				ClientCommand: &protobuf.ClientCommand{
