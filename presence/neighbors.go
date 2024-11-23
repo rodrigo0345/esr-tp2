@@ -51,6 +51,9 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 
 			// Start a new QUIC connection and stream if it doesn't exist already
 			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
+      defer config.CloseStream(stream)
+      defer config.CloseConnection(conn)
+
 			if err != nil {
         // logger.Error(fmt.Sprintf("Error starting stream to %s: %v", nb.ToString(), err))
 				r, err := markNeighborAsDisconnected(dvr, nb)

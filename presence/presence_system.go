@@ -73,85 +73,92 @@ func (ps *PresenceSystem) SignalDeadClientsService() {
 func (ps *PresenceSystem) ListenForClients() {
 	tlsConfig := config.GenerateTLS()
 
+	// Start the QUIC listener
 	listener, err := quic.ListenAddr(dvr.Interface{Interface: ps.Config.NodeIP}.ToString(), tlsConfig, nil)
-
 	if err != nil {
 		ps.Logger.Error(err.Error())
 		return
 	}
 
-	ps.Logger.Info(fmt.Sprintf("QUIC server is listening on port %d\n", ps.Config.NodeIP.Port))
+	ps.Logger.Info(fmt.Sprintf("QUIC server is listening on port %d", ps.Config.NodeIP.Port))
 
 	for {
+		// Accept incoming connections
 		connection, err := listener.Accept(context.Background())
 		if err != nil {
-			ps.Logger.Error(err.Error())
+			ps.Logger.Error(fmt.Sprintf("Failed to accept connection: %v", err))
 			continue
 		}
 
+		// Handle each connection in a separate goroutine
 		go func(session quic.Connection) {
 
+			// Accept a new stream from the connection
 			stream, err := session.AcceptStream(context.Background())
 			if err != nil {
-				ps.Logger.Error(err.Error())
 				return
 			}
 
-			data, err := config.ReceiveMessage(stream)
-			if err != nil {
-				ps.Logger.Error(err.Error())
-				return
-			}
+			// Handle the stream in a goroutine
+			go func(stream quic.Stream) {
 
-			header, err := config.UnmarshalHeader(data)
-			if err != nil {
-				ps.Logger.Error(err.Error())
-				return
-			}
-
-			header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
-
-			switch header.Type {
-			case protobuf.RequestType_ROUTINGTABLE:
-
-				HandleRouting(ps, connection, stream, header)
-
-				break
-
-			case protobuf.RequestType_RETRANSMIT:
-
-				isVideoPacket := header.GetServerVideoChunk() != nil
-
-				if !isVideoPacket {
-					// retransmit the packet
-					ps.TransmitionService.SendPacket(header, ps.RoutingTable)
+				// Receive message data
+				data, err := config.ReceiveMessage(stream)
+				if err != nil {
+					// Ignore the error, discard the stream
+					ps.Logger.Debug(fmt.Sprintf("Failed to receive message: %v", err))
+					return
 				}
 
-				var callback chan clientStreaming.CallbackData = make(chan clientStreaming.CallbackData)
-				ps.ClientService.Signal <- clientStreaming.SignalData{
-					Command:  clientStreaming.VIDEO,
-					Packet:   header,
-					Callback: callback,
+				// Unmarshal the message header
+				header, err := config.UnmarshalHeader(data)
+				if err != nil {
+					ps.Logger.Debug(fmt.Sprintf("Failed to unmarshal header: %v", err))
+					return
 				}
 
-				// it already sends the packet to the client
-				select {
-				case data := <-callback:
-					// not for us so, send to another neighbor
-					if data.Cancel {
+				// Append the current node to the path
+				header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
+
+				// Handle specific header types
+				switch header.Type {
+				case protobuf.RequestType_ROUTINGTABLE:
+					HandleRouting(ps, connection, stream, header)
+
+				case protobuf.RequestType_RETRANSMIT:
+
+          config.CloseStream(stream)
+
+					isVideoPacket := header.GetServerVideoChunk() != nil
+					if !isVideoPacket {
+						// Retransmit the packet to neighbors
 						ps.TransmitionService.SendPacket(header, ps.RoutingTable)
-					} else {
-            // do nothing
 					}
+
+					// Send to clients via signal channel
+					callback := make(chan clientStreaming.CallbackData, 1) // Buffered channel to avoid blocking
+					ps.ClientService.Signal <- clientStreaming.SignalData{
+						Command:  clientStreaming.VIDEO,
+						Packet:   header,
+						Callback: callback,
+					}
+
+					select {
+					case data := <-callback:
+						// If canceled, retransmit to neighbors
+						if data.Cancel {
+							ps.TransmitionService.SendPacket(header, ps.RoutingTable)
+						}
+					case <-time.After(time.Millisecond * 100): // Timeout to avoid indefinite blocking
+						ps.Logger.Debug("Callback timed out, ignoring")
+					}
+
+				default:
+					ps.Logger.Debug(fmt.Sprintf("Unknown packet type: %v", header.Type))
 				}
-
-				break
-			default:
-
-			}
+			}(stream)
 		}(connection)
 	}
-
 }
 
 func (ps *PresenceSystem) ListenForClientsInUDP() {

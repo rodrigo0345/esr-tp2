@@ -12,7 +12,7 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-var timeout time.Duration = 5 * time.Second // Set proper timeout duration
+var timeout time.Duration = 3 * time.Second // Set proper timeout duration
 
 // StartConnStream initializes a QUIC connection and opens a stream
 func StartConnStream(address string) (quic.Stream, quic.Connection, error) {

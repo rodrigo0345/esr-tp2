@@ -30,7 +30,7 @@ func Presence(cnf *config.AppConfigList) {
 
 	presenceSystem := NewPresenceSystem(cnf)
 
-	go presenceSystem.HeartBeatNeighbors(1)
+	go presenceSystem.HeartBeatNeighbors(2)
 	go presenceSystem.SignalDeadClientsService()
 	go presenceSystem.ListenForClients()
 	presenceSystem.ListenForClientsInUDP()
