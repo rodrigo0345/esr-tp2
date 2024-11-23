@@ -17,11 +17,11 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 			Header: header,
 			Cancel: true,
 		}
-    return
+		return
 	}
 
 	video := header.RequestedVideo
-  otherNodesNeedThisPacket := len(header.GetTarget()) > 1
+	otherNodesNeedThisPacket := len(header.GetTarget()) > 1
 
 	for _, client := range ss.UdpClients[Video(video)] {
 		data, err := proto.Marshal(header)
@@ -30,7 +30,7 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 			continue
 		}
 
-    udpAddr := fmt.Sprintf("%s:%d", client.Ip, client.Port)
+		udpAddr := fmt.Sprintf("%s:%d", client.Ip, client.Port)
 		go SendViaUDP(data, udpAddr)
 	}
 
@@ -52,6 +52,7 @@ func hasMessageForMe(header *protobuf.Header, nodeName string) bool {
 }
 
 func SendViaUDP(data []byte, clientIp string) {
+	const MaxPacketSize = 1400 // Choose a size less than the MTU
 	udpAddr, err := net.ResolveUDPAddr("udp", clientIp)
 	if err != nil {
 		fmt.Println("Error resolving UDP address:", err)
@@ -65,9 +66,15 @@ func SendViaUDP(data []byte, clientIp string) {
 	}
 	defer conn.Close()
 
-	_, err = conn.Write(data)
-	if err != nil {
-		fmt.Println("Error sending data:", err)
-		return
+	for start := 0; start < len(data); start += MaxPacketSize {
+		end := start + MaxPacketSize
+		if end > len(data) {
+			end = len(data)
+		}
+		_, err = conn.Write(data[start:end])
+		if err != nil {
+			fmt.Println("Error sending data:", err)
+			return
+		}
 	}
 }

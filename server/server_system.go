@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -77,8 +80,6 @@ func (ss *ServerSystem) ListenForClients() {
 					ss.Logger.Error(err.Error())
 					return
 				}
-
-        ss.Logger.Info(fmt.Sprintf("Received message \n"))
 
 				// unmarshal protobuf
 				header, err := config.UnmarshalHeader(msg)
@@ -192,6 +193,7 @@ func (ss *ServerSystem) BackgroundStreaming() {
 	}
 }
 
+
 func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 	pwd := os.Getenv("PWD")
 	videoFilePath := fmt.Sprintf("%s/videos/%s", pwd, video.Video)
@@ -199,29 +201,69 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 	ss.Logger.Info(fmt.Sprintf("Starting stream for video: %s, file path: %s", video.Video, videoFilePath))
 
 	for {
-		cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", videoFilePath, "-f", "image2pipe", "-vcodec", "mjpeg", "-")
+		// Initialize ffmpeg command to stream video as MJPEG
+		cmd := exec.Command("ffmpeg",
+			"-stream_loop", "-1",
+			"-i", videoFilePath,
+			"-f", "image2pipe",
+			"-vcodec", "mjpeg",
+			"-",
+		)
+
+		// Capture stdout (video frames)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			ss.Logger.Error(fmt.Sprintf("Failed to start ffmpeg process for video %s: %v", video.Video, err))
+			ss.Logger.Error(fmt.Sprintf("Failed to get stdout pipe for video %s: %v", video.Video, err))
+			return
+		}
+
+		// Capture stderr (metrics)
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			ss.Logger.Error(fmt.Sprintf("Failed to get stderr pipe for video %s: %v", video.Video, err))
 			return
 		}
 
 		if err := cmd.Start(); err != nil {
-			ss.Logger.Error(fmt.Sprintf("Failed to execute ffmpeg for video %s: %v", video.Video, err))
+			ss.Logger.Error(fmt.Sprintf("Failed to start ffmpeg for video %s: %v", video.Video, err))
 			return
 		}
 
 		reader := bufio.NewReader(stdout)
-		defer cmd.Wait()
+		metricsReader := bufio.NewReader(stderr)
+
+		// Use WaitGroup to manage goroutines
+		var wg sync.WaitGroup
+		metricsChan := make(chan ServerMetrics, 1)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			collectMetrics(metricsReader, metricsChan)
+		}()
 
 		sqNumber := 0
+
+		// Initialize default metrics
+		currentMetrics := ServerMetrics{
+			BitrateKbps:         0,
+			Width:               0,
+			Height:              0,
+			Fps:                 0.0,
+			LatencyMs:           0,
+			CurrentBitrateKbps:  0,
+			PreviousBitrateKbps: 0,
+		}
 
 		for {
 			select {
 			case <-stopChan:
 				cmd.Process.Kill() // Terminate ffmpeg process
 				ss.Logger.Info(fmt.Sprintf("Stream stopped for video %s", video.Video))
+				wg.Wait()
 				return
+			case metrics := <-metricsChan:
+				// Update current metrics
+				currentMetrics = metrics
 			default:
 				frameData, err := readFrame(reader)
 				if err != nil {
@@ -239,7 +281,23 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					targets = append(targets, client.PresenceNodeName)
 				}
 
-				ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", targets))
+				ss.Logger.Info(fmt.Sprintf("Sending video chunk to %s", targets))
+
+				// Populate the ServerVideoChunk with dynamic metrics
+				serverVideoChunk := &protobuf.ServerVideoChunk{
+					SequenceNumber:       int32(sqNumber),
+					Timestamp:            time.Now().UnixMilli(),
+					Format:               protobuf.VideoFormat_MJPEG,
+					Data:                 frameData,
+					IsLastChunk:          false,
+					BitrateKbps:          currentMetrics.BitrateKbps,
+					Width:                int32(currentMetrics.Width),
+					Height:               int32(currentMetrics.Height),
+					Fps:                  currentMetrics.Fps,
+					LatencyMs:            currentMetrics.LatencyMs,
+					CurrentBitrateKbps:  currentMetrics.CurrentBitrateKbps,
+					PreviousBitrateKbps: currentMetrics.PreviousBitrateKbps,
+				}
 
 				header := &protobuf.Header{
 					Sender:         ss.PresenceSystem.Config.NodeName,
@@ -250,15 +308,10 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					Length:         int32(len(frameData)),
 					Timestamp:      time.Now().UnixMilli(),
 					Content: &protobuf.Header_ServerVideoChunk{
-						ServerVideoChunk: &protobuf.ServerVideoChunk{
-							Data:           frameData,
-							SequenceNumber: int32(sqNumber),
-							Timestamp:      time.Now().UnixMilli(),
-							Format:         protobuf.VideoFormat_MJPEG,
-							IsLastChunk:    false,
-						},
+						ServerVideoChunk: serverVideoChunk,
 					},
 				}
+
 				success := ss.PresenceSystem.TransmitionService.SendPacket(header, ss.PresenceSystem.RoutingTable)
 
 				if !success {
@@ -273,7 +326,79 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 		// Properly stop ffmpeg if we break out of the loop
 		cmd.Process.Kill()
 		cmd.Wait()
+		wg.Wait()
 	}
+}
+
+// ServerMetrics holds the dynamic metrics collected from ffmpeg
+type ServerMetrics struct {
+	BitrateKbps         int32
+	Width               int
+	Height              int
+	Fps                 float64
+	LatencyMs           int64
+	CurrentBitrateKbps  int32
+	PreviousBitrateKbps int32
+}
+
+// collectMetrics parses ffmpeg's stderr output to extract metrics
+func collectMetrics(reader *bufio.Reader, metricsChan chan<- ServerMetrics) {
+	// Regular expressions to match ffmpeg's metric output
+	// Example ffmpeg stderr output line: "frame=  240 fps=25 q=28.0 size=    1024kB time=00:00:10.00 bitrate= 838.9kbits/s speed=1.00x"
+	frameRegex := regexp.MustCompile(`frame=\s*(\d+).*fps=([\d.]+).*size=\s*(\d+)kB.*bitrate=\s*([\d.]+)kbits/s`)
+	timeRegex := regexp.MustCompile(`time=(\d+:\d+:\d+\.\d+)`)
+
+	var (
+		previousBitrate float64
+	)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			// Log and continue on other errors
+			fmt.Printf("Error reading ffmpeg stderr: %v\n", err)
+			continue
+		}
+
+		// Parse frame metrics
+		if matches := frameRegex.FindStringSubmatch(line); matches != nil {
+			// frameNumber, _ := strconv.Atoi(matches[1])
+			fps, _ := strconv.ParseFloat(matches[2], 64)
+			// sizeKB, _ := strconv.Atoi(matches[3])
+			bitrate, _ := strconv.ParseFloat(matches[4], 64)
+
+			// Example calculation for latency (requires additional implementation)
+			latencyMs := calculateLatency()
+
+			metrics := ServerMetrics{
+				BitrateKbps:        int32(bitrate),
+				Fps:                 fps,
+				LatencyMs:           latencyMs,
+				CurrentBitrateKbps:  int32(bitrate),
+				PreviousBitrateKbps: int32(previousBitrate),
+			}
+
+			// Update previous bitrate
+			previousBitrate = bitrate
+
+			metricsChan <- metrics
+		}
+
+		// Optionally, parse other metrics like time or resolution if available
+		if matches := timeRegex.FindStringSubmatch(line); matches != nil {
+			// Implement parsing if needed
+		}
+	}
+}
+
+// calculateLatency is a placeholder for latency calculation logic
+func calculateLatency() int64 {
+	// Implement latency calculation logic here
+	// This could involve tracking timestamps when frames are sent and received
+	return 0 // Placeholder value
 }
 
 // Helper function to read a frame from the ffmpeg output
