@@ -35,8 +35,8 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 
 	logger := config.NewLogger(2, cnf.NodeName)
 
-  streamingService := clientStreaming.NewStreamingService(cnf, logger)
-  streamingService.RunBackgroundRoutine(5)
+	streamingService := clientStreaming.NewStreamingService(cnf, logger)
+	streamingService.RunBackgroundRoutine(5)
 
 	transmissionService := transmitions.NewTransmissionService(logger, cnf)
 
@@ -120,8 +120,6 @@ func (ps *PresenceSystem) ListenForClients() {
 
 			case protobuf.RequestType_RETRANSMIT:
 
-        ps.Logger.Info(fmt.Sprintf("Node %s sent '%s'\n", header.GetSender(), header.RequestedVideo))
-
 				isVideoPacket := header.GetServerVideoChunk() != nil
 
 				if !isVideoPacket {
@@ -129,18 +127,23 @@ func (ps *PresenceSystem) ListenForClients() {
 					ps.TransmitionService.SendPacket(header, ps.RoutingTable)
 				}
 
-				var callback clientStreaming.Callback = make(chan clientStreaming.CallbackData)
-
-				ps.ClientService.SendSignal(clientStreaming.SignalData{
+				var callback chan clientStreaming.CallbackData = make(chan clientStreaming.CallbackData)
+				ps.ClientService.Signal <- clientStreaming.SignalData{
 					Command:  clientStreaming.VIDEO,
-					Video:    clientStreaming.Video(header.RequestedVideo),
-					Callback: callback,
 					Packet:   header,
-				})
+					Callback: callback,
+				}
 
 				// it already sends the packet to the client
 				select {
-				case _ = <-callback:
+				case data := <-callback:
+					// not for us so, send to another neighbor
+					if data.Cancel {
+						ps.Logger.Info(fmt.Sprintf("Forwarding request from %s", header.GetSender()))
+						ps.TransmitionService.SendPacket(header, ps.RoutingTable)
+					} else {
+						ps.Logger.Info(fmt.Sprintf("Reached the client"))
+					}
 				}
 
 				break
@@ -200,7 +203,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 					operation = clientStreaming.STOP
 				}
 
-        ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
+				ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
 
 				var callback chan clientStreaming.CallbackData = make(chan clientStreaming.CallbackData)
 				ps.ClientService.Signal <- clientStreaming.SignalData{
@@ -219,17 +222,17 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 
 					} else {
 
-            success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable)
+						success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable)
 
-            if !success {
-              // stop 
-              ps.ClientService.SendSignal(clientStreaming.SignalData{
-                Command:   clientStreaming.STOP,
-                Video:     clientStreaming.Video(videoName),
-                UdpClient: config.ToInterface(remoteIp),
-                Callback:  nil,
-              })
-            }
+						if !success {
+							// stop
+							ps.ClientService.SendSignal(clientStreaming.SignalData{
+								Command:   clientStreaming.STOP,
+								Video:     clientStreaming.Video(videoName),
+								UdpClient: config.ToInterface(remoteIp),
+								Callback:  nil,
+							})
+						}
 
 					}
 				}

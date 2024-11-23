@@ -11,11 +11,14 @@ import (
 func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Header) {
 
 	mine := isMessageForMe(header, ss.Config.NodeName)
+
+  ss.Logger.Info("Message is not for me")
 	if !mine {
 		callback <- CallbackData{
 			Header: header,
 			Cancel: true,
 		}
+    return
 	}
 
 	video := header.RequestedVideo
