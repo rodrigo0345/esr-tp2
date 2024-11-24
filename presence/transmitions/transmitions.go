@@ -2,6 +2,8 @@ package transmitions
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
@@ -21,7 +23,11 @@ func NewTransmissionService(logger *config.Logger, config *config.AppConfigList)
 	}
 }
 
-func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.DistanceVectorRouting) bool {
+func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.DistanceVectorRouting, isUdp bool) bool {
+
+  if isUdp {
+    ts.Logger.Debug("Using UDP")
+  }
 	messages := SplitTargets(packet.Target, rt, packet)
 
 	if len(messages) == 0 {
@@ -44,7 +50,11 @@ func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.Dista
 			continue
 		}
 
-		go sendData(data, neighborIp)
+    if !isUdp {
+      go sendData(data, neighborIp)
+    } else {
+      go sendDataUDP(data, neighborIp)
+    }
 	}
 	return true
 }
@@ -66,6 +76,24 @@ func sendData(data []byte, clientIp string) {
 fail:
 	config.CloseStream(neighborStream)
 	config.CloseConnection(conn)
+}
+
+func sendDataUDP(data []byte, clientIp string) {
+  // split the ip and port
+  port := strings.Split(clientIp, ":")[1]
+  ip := strings.Split(clientIp, ":")[0]
+
+  portInt, err := strconv.Atoi(port)
+  if err != nil {
+    fmt.Println(err)
+    return
+  }
+
+  // update the port
+  clientIp = fmt.Sprintf("%s:%d", ip, portInt - 1)
+  fmt.Println(fmt.Sprintf("Sending UDP packet to %s", clientIp))
+
+  config.SendMessageUDP(clientIp, data)
 }
 
 // this enables us to not have duplicate streams of the same video

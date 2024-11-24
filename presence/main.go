@@ -33,5 +33,6 @@ func Presence(cnf *config.AppConfigList) {
 	go presenceSystem.HeartBeatNeighbors(2)
 	go presenceSystem.SignalDeadClientsService()
 	go presenceSystem.ListenForClients()
+  go presenceSystem.ListenForRetransmitInUDP()
 	presenceSystem.ListenForClientsInUDP()
 }

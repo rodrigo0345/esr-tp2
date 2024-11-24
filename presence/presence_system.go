@@ -17,7 +17,6 @@ import (
 type PresenceSystem struct {
 	RoutingTable       *dvr.DistanceVectorRouting
 	NeighborList       *NeighborList
-	ConnectionPool     *dvr.ConnectionPool
 	Logger             *config.Logger
 	Config             *config.AppConfigList
 	ClientService      *clientStreaming.StreamingService
@@ -30,9 +29,6 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 	}
 	routingTable := dvr.CreateDistanceVectorRouting(cnf)
 
-	// used to reduce the time spent opening and closing connections
-	neighborsConnectionsMap := dvr.NewNeighborsConnectionsMap()
-
 	logger := config.NewLogger(2, cnf.NodeName)
 
 	streamingService := clientStreaming.NewStreamingService(cnf, logger)
@@ -43,7 +39,6 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 	return &PresenceSystem{
 		RoutingTable:       routingTable,
 		NeighborList:       neighborList,
-		ConnectionPool:     neighborsConnectionsMap,
 		Logger:             logger,
 		Config:             cnf,
 		ClientService:      streamingService,
@@ -53,8 +48,8 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 
 func (ps *PresenceSystem) HeartBeatNeighbors(seconds int) {
 	for {
-		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Logger, ps.Config, ps.RoutingTable, ps.ConnectionPool)
-		// ps.RoutingTable.Print(ps.Logger)
+		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Logger, ps.Config, ps.RoutingTable)
+		ps.RoutingTable.Print(ps.Logger)
 		time.Sleep(time.Second * time.Duration(seconds))
 	}
 }
@@ -64,7 +59,7 @@ func (ps *PresenceSystem) SignalDeadClientsService() {
 		select {
 		case data := <-ps.ClientService.SignalDead:
 			ps.Logger.Info(fmt.Sprintf("Client %s is not pinging\n", data.Header.GetSender()))
-			ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable)
+			ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable, false)
 		}
 	}
 }
@@ -127,37 +122,88 @@ func (ps *PresenceSystem) ListenForClients() {
 
 				case protobuf.RequestType_RETRANSMIT:
 
-          config.CloseStream(stream)
+					config.CloseStream(stream)
 
 					isVideoPacket := header.GetServerVideoChunk() != nil
-					if !isVideoPacket {
-						// Retransmit the packet to neighbors
-						ps.TransmitionService.SendPacket(header, ps.RoutingTable)
-					}
+						ps.TransmitionService.SendPacket(header, ps.RoutingTable, false)
 
-					// Send to clients via signal channel
-					callback := make(chan clientStreaming.CallbackData, 1) // Buffered channel to avoid blocking
-					ps.ClientService.Signal <- clientStreaming.SignalData{
-						Command:  clientStreaming.VIDEO,
-						Packet:   header,
-						Callback: callback,
-					}
-
-					select {
-					case data := <-callback:
-						// If canceled, retransmit to neighbors
-						if data.Cancel {
-							ps.TransmitionService.SendPacket(header, ps.RoutingTable)
-						}
-					case <-time.After(time.Millisecond * 100): // Timeout to avoid indefinite blocking
-						ps.Logger.Debug("Callback timed out, ignoring")
-					}
+          if isVideoPacket {
+            ps.Logger.Debug("Using the wrong protocol")
+            return
+          }
 
 				default:
 					ps.Logger.Debug(fmt.Sprintf("Unknown packet type: %v", header.Type))
 				}
+
 			}(stream)
 		}(connection)
+	}
+}
+
+func (ps *PresenceSystem) ListenForRetransmitInUDP() {
+	addr := ps.Config.NodeIP
+	udpPort := addr.Port - 1 // Assuming NodeIP.Port is an integer
+	addrString := fmt.Sprintf("%s:%d", addr.Ip, udpPort)
+
+	netAddr, err := net.ResolveUDPAddr("udp", addrString)
+	if err != nil {
+		ps.Logger.Error(fmt.Sprintf("Failed to resolve UDP address %s: %v", addrString, err))
+		return
+	}
+
+	conn, err := net.ListenUDP("udp", netAddr)
+	if err != nil {
+		ps.Logger.Error(fmt.Sprintf("Failed to listen on UDP address %s: %v", addrString, err))
+		return
+	}
+	defer conn.Close()
+	ps.Logger.Info(fmt.Sprintf("Listening for UDP retransmit on %s", addrString))
+
+	for {
+    data, _, err := config.ReceiveMessageUDP(conn)
+		if err != nil {
+			ps.Logger.Error(fmt.Sprintf("Error reading from UDP: %v", err))
+			continue // Consider breaking the loop or implementing a retry mechanism based on the error
+		}
+
+		go ps.handleUDPMessage(data)
+	}
+}
+
+func (ps *PresenceSystem) handleUDPMessage(data []byte) {
+	header, err := config.UnmarshalHeader(data)
+	if err != nil {
+		return
+	}
+
+	if header.Type != protobuf.RequestType_RETRANSMIT {
+		return
+	}
+
+	isVideoPacket := header.GetServerVideoChunk() != nil
+  ps.Logger.Info(fmt.Sprintf("Received video chunk from %s", header.GetSender()))
+	if !isVideoPacket {
+		// Retransmit the packet to neighbors
+		ps.TransmitionService.SendPacket(header, ps.RoutingTable, true)
+	}
+
+	// Send to clients via signal channel
+	callback := make(chan clientStreaming.CallbackData, 1) // Buffered channel to avoid blocking
+	ps.ClientService.Signal <- clientStreaming.SignalData{
+		Command:  clientStreaming.VIDEO,
+		Packet:   header,
+		Callback: callback,
+	}
+
+	select {
+	case data := <-callback:
+		// If canceled, retransmit to neighbors
+		if data.Cancel {
+			ps.TransmitionService.SendPacket(header, ps.RoutingTable, true)
+		}
+	case <-time.After(100 * time.Millisecond): // Timeout to avoid indefinite blocking
+		ps.Logger.Debug("Callback timed out, ignoring")
 	}
 }
 
@@ -228,7 +274,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 
 					} else {
 
-						success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable)
+            success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable, false)
 
 						if !success {
 							// stop

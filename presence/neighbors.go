@@ -20,7 +20,7 @@ type NeighborResult struct {
 	RoutingTable *protobuf.DistanceVectorRouting
 }
 
-func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.ConnectionPool) *distancevectorrouting.DistanceVectorRouting {
+func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting) *distancevectorrouting.DistanceVectorRouting {
 
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
@@ -50,7 +50,7 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 			nb := distancevectorrouting.Interface{Interface: neighbor}
 
 			// Start a new QUIC connection and stream if it doesn't exist already
-			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
+			stream, conn, err := config.StartConnStream(nb.ToString())
       defer config.CloseStream(stream)
       defer config.CloseConnection(conn)
 

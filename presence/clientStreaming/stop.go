@@ -33,7 +33,7 @@ func (ss *StreamingService) Stop(video Video, udpClient *protobuf.Interface, cal
 	if _, exists := ss.UdpClients[video]; !exists {
     callback <- CallbackData {
       Header: msg,
-      Cancel: true,
+      Cancel: false,
     }
     return 
 	}

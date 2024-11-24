@@ -312,14 +312,14 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					},
 				}
 
-				success := ss.PresenceSystem.TransmitionService.SendPacket(header, ss.PresenceSystem.RoutingTable)
+				success := ss.PresenceSystem.TransmitionService.SendPacket(header, ss.PresenceSystem.RoutingTable, true)
 
 				if !success {
 					ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s", header.GetSender()))
 				}
 
 				// Sleep to control frame rate (e.g., 30 FPS)
-				time.Sleep(time.Millisecond * 33)
+				time.Sleep(time.Millisecond * 25)
 			}
 		}
 

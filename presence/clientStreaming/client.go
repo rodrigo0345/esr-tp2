@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"google.golang.org/protobuf/proto"
 )
@@ -31,7 +32,8 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 		}
 
 		udpAddr := fmt.Sprintf("%s:%d", client.Ip, client.Port)
-		go SendViaUDP(data, udpAddr)
+    ss.Logger.Info(fmt.Sprintf("Sending via UDP to %s", udpAddr))
+		go config.SendMessageUDP(udpAddr, data)
 	}
 
 	callback <- CallbackData{
