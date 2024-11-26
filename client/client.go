@@ -19,10 +19,21 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func Client(config *config.AppConfigList) {
+type BestPop struct {
+  Ip *protobuf.Interface
+  Avg time.Duration
+}
+
+func Client(cnf *config.AppConfigList) {
 	// Address to send messages
-	presenceNetworkEntrypointIp := config.Neighbors[0]
-	pneIpString := fmt.Sprintf("%s:%d", presenceNetworkEntrypointIp.Ip, presenceNetworkEntrypointIp.Port)
+  logger := config.NewLogger(2, cnf.NodeName)
+
+  pops, err := GetPops(cnf, logger)
+
+  // TODO: ping all the pops and select the one with the lowest latency
+  bestPop := GetBestPop(pops, logger)
+
+	pneIpString := fmt.Sprintf("%s:%d", bestPop.Ip.Ip, bestPop.Ip.Port)
 	fmt.Println(pneIpString)
 
 	listenIp := "0.0.0.0:2222"
@@ -71,7 +82,7 @@ func Client(config *config.AppConfigList) {
 			Timestamp:      time.Now().UnixMilli(),
 			ClientIp:       listenIp,
 			Sender:         "client",
-      Path:           config.NodeName,
+      Path:           cnf.NodeName,
 			Target:         target,
 			RequestedVideo: "lol.Mjpeg",
 			Content: &protobuf.Header_ClientCommand{

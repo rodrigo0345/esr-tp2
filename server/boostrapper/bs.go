@@ -46,7 +46,7 @@ func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, h
   bs.logger.Info(fmt.Sprintf("Sending Neighbors: %v\n", nodeNeighbors[header.Sender]))
 
 	message := protobuf.Header{
-		Type:           protobuf.RequestType_RETRANSMIT,
+		Type:           *protobuf.RequestType_BOOTSTRAPER.Enum(),
 		Length:         0,
 		Timestamp:      time.Now().UnixMilli(),
 		ClientIp:       "nil",
