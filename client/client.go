@@ -46,6 +46,7 @@ func Client(config *cnf.AppConfigList) {
 	if err != nil {
 		log.Fatalf("Failed to create UDP listener: %v", err)
 	}
+	defer listener.Close()
 
 	// Create the app and window
 	myApp := app.New()
@@ -60,12 +61,12 @@ func Client(config *cnf.AppConfigList) {
 
 	// Statistics variables
 	var (
-		prevDelay   float64
-		jittersum   float64
-		packetCount int
-		startTime   = time.Now()
-		statsMutex  sync.Mutex
-		totalSent   int // Total number of packets received (sequence number)
+		prevDelay          float64
+		jittersum          float64
+		packetCount        int
+		totalSent          int
+		totalBytesReceived int64
+		statsMutex         sync.Mutex
 	)
 
 	resetStats := func() {
@@ -76,6 +77,7 @@ func Client(config *cnf.AppConfigList) {
 		packetCount = 0
 		jittersum = 0.0
 		prevDelay = 0.0
+		totalBytesReceived = 0
 	}
 
 	// Entry widgets and buttons
@@ -91,7 +93,7 @@ func Client(config *cnf.AppConfigList) {
 	})
 
 	statsButton := widget.NewButton("Statistics", func() {
-		showStatsWindow(myApp, startTime, &packetCount, &jittersum, &statsMutex, &totalSent)
+		showStatsWindow(myApp, &statsMutex, &packetCount, &jittersum, &totalSent, &totalBytesReceived)
 	})
 
 	controls := container.NewVBox(messageEntry, targetEntry, sendButton, cancelButton, statsButton, pathLabel)
@@ -104,7 +106,6 @@ func Client(config *cnf.AppConfigList) {
 	go func() {
 		for {
 			data, _, err := cnf.ReceiveMessageUDP(listener)
-
 			if err != nil {
 				log.Printf("Error receiving message: %s\n", err)
 				continue
@@ -146,7 +147,8 @@ func Client(config *cnf.AppConfigList) {
 			}
 			prevDelay = currentDelay
 			packetCount++
-			totalSent = int(msg.GetServerVideoChunk().GetSequenceNumber()) // Update totalSent with the sequence number
+			totalSent = int(msg.GetServerVideoChunk().GetSequenceNumber())
+			totalBytesReceived += int64(len(videoData))
 			statsMutex.Unlock()
 		}
 	}()
@@ -154,7 +156,6 @@ func Client(config *cnf.AppConfigList) {
 	myWindow.ShowAndRun()
 }
 
-// Helper function to send commands
 // Helper function to send commands
 func sendCommand(command, video, target string, conn net.Conn, config *cnf.AppConfigList, listenIp string, resetStats func()) {
 	// Reset statistics before sending the command
@@ -188,68 +189,47 @@ func sendCommand(command, video, target string, conn net.Conn, config *cnf.AppCo
 }
 
 // Show statistics in a new window
-func showStatsWindow(app fyne.App, startTime time.Time, packetCount *int, jittersum *float64, statsMutex *sync.Mutex, totalSent *int) {
+func showStatsWindow(app fyne.App, statsMutex *sync.Mutex, packetCount *int, jittersum *float64, totalSent *int, totalBytesReceived *int64) {
 	statsWindow := app.NewWindow("Statistics")
 	statsWindow.Resize(fyne.NewSize(400, 300))
 
-	// Labels para exibição das estatísticas
 	elapsedTimeLabel := widget.NewLabel("")
 	packetCountLabel := widget.NewLabel("")
+	totalBytesLabel := widget.NewLabel("")
 	avgJitterLabel := widget.NewLabel("")
 	packetLossRate := widget.NewLabel("")
 
 	statsContent := container.NewVBox(
 		elapsedTimeLabel,
 		packetCountLabel,
+		totalBytesLabel,
 		avgJitterLabel,
 		packetLossRate,
 	)
 	statsWindow.SetContent(statsContent)
 
-	// Channel to signal window closure
-	done := make(chan struct{})
-
-	statsWindow.SetOnClosed(func() {
-		close(done)
-	})
-
+	// Update statistics periodically
 	go func() {
-		for {
-			select {
-			case <-done:
-				return // Close Goroutine when the window is close
-			default:
-				statsMutex.Lock()
-				// Elapsed time
-				elapsedTime := time.Since(startTime).Seconds()
-
-				// Calculate Avg Jitter
-				avgJitter := 0.0
-				if *packetCount > 1 {
-					avgJitter = *jittersum / float64(*packetCount-1)
-				}
-
-				// Calculate Packet Loss
-				expectedPackets := *totalSent
-				lossCount := expectedPackets - *packetCount
-
-				packetLossPercentage := 0.0
-				if expectedPackets > 0 {
-					packetLossPercentage = float64(lossCount) / float64(expectedPackets) * 100
-				}
-
-				statsMutex.Unlock()
-
-				// Update the label values
-				elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f seconds", elapsedTime))
-				packetCountLabel.SetText(fmt.Sprintf("Packets Received: %d", *packetCount))
-				avgJitterLabel.SetText(fmt.Sprintf("Average Jitter: %.2f ms", avgJitter))
-				packetLossRate.SetText(fmt.Sprintf("Packet Loss: %.2f%%", packetLossPercentage))
-
-				time.Sleep(500 * time.Millisecond) // Update every 500ms
+		for range time.Tick(500 * time.Millisecond) {
+			statsMutex.Lock()
+			avgJitter := 0.0
+			if *packetCount > 1 {
+				avgJitter = *jittersum / float64(*packetCount-1)
 			}
+			packetLoss := 0.0
+			if *totalSent > 0 {
+				lostPackets := *totalSent - *packetCount
+				packetLoss = (float64(lostPackets) / float64(*totalSent)) * 100
+			}
+			totalBytes := *totalBytesReceived
+			statsMutex.Unlock()
+
+			elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f seconds", time.Since(time.Now()).Seconds()))
+			packetCountLabel.SetText(fmt.Sprintf("Packets Received: %d", *packetCount))
+			totalBytesLabel.SetText(fmt.Sprintf("Total Bytes: %d", totalBytes))
+			avgJitterLabel.SetText(fmt.Sprintf("Avg Jitter: %.2f ms", avgJitter))
+			packetLossRate.SetText(fmt.Sprintf("Packet Loss: %.2f%%", packetLoss))
 		}
 	}()
-
 	statsWindow.Show()
 }

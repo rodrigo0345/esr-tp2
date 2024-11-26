@@ -125,12 +125,12 @@ func (ps *PresenceSystem) ListenForClients() {
 					config.CloseStream(stream)
 
 					isVideoPacket := header.GetServerVideoChunk() != nil
-						ps.TransmitionService.SendPacket(header, ps.RoutingTable, false)
+					ps.TransmitionService.SendPacket(header, ps.RoutingTable, false)
 
-          if isVideoPacket {
-            ps.Logger.Debug("Using the wrong protocol")
-            return
-          }
+					if isVideoPacket {
+						ps.Logger.Debug("Using the wrong protocol")
+						return
+					}
 
 				default:
 					ps.Logger.Debug(fmt.Sprintf("Unknown packet type: %v", header.Type))
@@ -161,7 +161,7 @@ func (ps *PresenceSystem) ListenForRetransmitInUDP() {
 	ps.Logger.Info(fmt.Sprintf("Listening for UDP retransmit on %s", addrString))
 
 	for {
-    data, _, err := config.ReceiveMessageUDP(conn)
+		data, _, err := config.ReceiveMessageUDP(conn)
 		if err != nil {
 			ps.Logger.Error(fmt.Sprintf("Error reading from UDP: %v", err))
 			continue // Consider breaking the loop or implementing a retry mechanism based on the error
@@ -182,7 +182,7 @@ func (ps *PresenceSystem) handleUDPMessage(data []byte) {
 	}
 
 	isVideoPacket := header.GetServerVideoChunk() != nil
-  ps.Logger.Info(fmt.Sprintf("Received video chunk from %s", header.GetSender()))
+	ps.Logger.Info(fmt.Sprintf("Received video chunk from %s", header.GetSender()))
 	if !isVideoPacket {
 		// Retransmit the packet to neighbors
 		ps.TransmitionService.SendPacket(header, ps.RoutingTable, true)
@@ -241,6 +241,8 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			}
 
 			videoName := header.RequestedVideo
+			// Append the current node to the path
+			header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
 
 			// Process the message based on its type
 			switch header.Type {
@@ -274,7 +276,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 
 					} else {
 
-            success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable, false)
+						success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable, false)
 
 						if !success {
 							// stop
