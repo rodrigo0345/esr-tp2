@@ -14,5 +14,5 @@ make
 
 # Run the main executable with the provided parameters
 # this is likely crash a lot if you have race conditions
-go run main.go presence -v 10.0.13.10:4242 -n "$name"
+./bin/main presence -v 10.0.13.10:4242 -n "$name"
 

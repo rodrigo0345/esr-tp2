@@ -44,14 +44,14 @@ func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, h
 	}
 
   bs.logger.Info(fmt.Sprintf("Sending Neighbors: %v\n", nodeNeighbors[header.Sender]))
+  targets := make([]string, 1)
 
 	message := protobuf.Header{
 		Type:           protobuf.RequestType_RETRANSMIT,
 		Length:         0,
 		Timestamp:      time.Now().UnixMilli(),
-		ClientIp:       "nil",
 		Sender:         "bootstrapper",
-		Target:         "nil",
+		Target:         targets,
 		RequestedVideo: "nil",
 		Content: &protobuf.Header_BootstraperResult{
 			BootstraperResult: &protobuf.BootstraperResult{
@@ -60,7 +60,7 @@ func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, h
 		},
 	}
   message.Length = int32(proto.Size(&message))
-  message.Target = session.RemoteAddr().String()
+  message.Target[0] = session.RemoteAddr().String()
 
   data, err = proto.Marshal(&message)
 

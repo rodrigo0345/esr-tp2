@@ -6,23 +6,21 @@ import (
 	"net"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/quic-go/quic-go"
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
+	"github.com/rodrigo0345/esr-tp2/presence/clientStreaming"
 	dvr "github.com/rodrigo0345/esr-tp2/presence/distance_vector_routing"
-	"github.com/rodrigo0345/esr-tp2/presence/streaming"
+	"github.com/rodrigo0345/esr-tp2/presence/transmitions"
 )
 
 type PresenceSystem struct {
-	RoutingTable         *dvr.DistanceVectorRouting
-	NeighborList         *NeighborList
-	CurrentClientStreams map[string]*ClientList
-	CurrentNodeStreams   map[string]*NodeList
-	ConnectionPool       *dvr.ConnectionPool
-	Logger               *config.Logger
-	Config               *config.AppConfigList
+	RoutingTable       *dvr.DistanceVectorRouting
+	NeighborList       *NeighborList
+	Logger             *config.Logger
+	Config             *config.AppConfigList
+	ClientService      *clientStreaming.StreamingService
+	TransmitionService *transmitions.TransmissionService
 }
 
 func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
@@ -31,65 +29,38 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 	}
 	routingTable := dvr.CreateDistanceVectorRouting(cnf)
 
-	// used to reduce the time spent opening and closing connections
-	neighborsConnectionsMap := dvr.NewNeighborsConnectionsMap()
-	currentNodeStreams := make(map[string]*NodeList)
-
 	logger := config.NewLogger(2, cnf.NodeName)
 
+	streamingService := clientStreaming.NewStreamingService(cnf, logger)
+	streamingService.RunBackgroundRoutine(120)
+
+	transmissionService := transmitions.NewTransmissionService(logger, cnf)
+
 	return &PresenceSystem{
-		RoutingTable:         routingTable,
-		NeighborList:         neighborList,
-		CurrentClientStreams: make(map[string]*ClientList),
-		CurrentNodeStreams:   currentNodeStreams,
-		ConnectionPool:       neighborsConnectionsMap,
-		Logger:               logger,
-		Config:               cnf,
+		RoutingTable:       routingTable,
+		NeighborList:       neighborList,
+		Logger:             logger,
+		Config:             cnf,
+		ClientService:      streamingService,
+		TransmitionService: transmissionService,
 	}
 }
 
 func (ps *PresenceSystem) HeartBeatNeighbors(seconds int) {
 	for {
-		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Logger, ps.Config, ps.RoutingTable, ps.ConnectionPool)
-		// ps.RoutingTable.Print(ps.Logger)
+		ps.RoutingTable = ps.NeighborList.PingNeighbors(ps.Logger, ps.Config, ps.RoutingTable)
+		ps.RoutingTable.Print(ps.Logger)
 		time.Sleep(time.Second * time.Duration(seconds))
 	}
 }
 
-func (ps *PresenceSystem) HeartBeatClients(seconds int) {
+func (ps *PresenceSystem) SignalDeadClientsService() {
 	for {
-		// kill clients that dont ping in a while
-		for video := range ps.CurrentClientStreams {
-			ps.CurrentClientStreams[video].RemoveDeadClients(seconds)
-
-			// if the list is empty, notify the server that it can stop streaming
-			if len(ps.CurrentClientStreams[video].Content) != 0 {
-				break
-			}
-
-			ps.Logger.Info(fmt.Sprintf("No clients are connected to %s\n", video))
-			delete(ps.CurrentClientStreams, video)
-
-			header := &protobuf.Header{
-				Type:           protobuf.RequestType_RETRANSMIT,
-				Length:         0,
-				Timestamp:      time.Now().UnixMilli(),
-				ClientIp:       fmt.Sprintf("%s:%d", ps.Config.NodeIP.Ip, ps.Config.NodeIP.Port),
-				Sender:         ps.Config.NodeName,
-				Target:         "s1", // TODO: change this and make it dynamic
-				RequestedVideo: video,
-				Content: &protobuf.Header_ClientCommand{
-					ClientCommand: &protobuf.ClientCommand{
-						Command:               protobuf.PlayerCommand_STOP,
-						AdditionalInformation: "stopped because no clients are connected",
-					},
-				},
-			}
-			header.Length = int32(proto.Size(header))
-
-			SendMessage(ps, header)
+		select {
+		case data := <-ps.ClientService.SignalDead:
+			ps.Logger.Info(fmt.Sprintf("Client %s is not pinging\n", data.Header.GetSender()))
+			ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable, false)
 		}
-		time.Sleep(time.Second * time.Duration(seconds))
 	}
 }
 
@@ -97,123 +68,143 @@ func (ps *PresenceSystem) HeartBeatClients(seconds int) {
 func (ps *PresenceSystem) ListenForClients() {
 	tlsConfig := config.GenerateTLS()
 
+	// Start the QUIC listener
 	listener, err := quic.ListenAddr(dvr.Interface{Interface: ps.Config.NodeIP}.ToString(), tlsConfig, nil)
-
 	if err != nil {
 		ps.Logger.Error(err.Error())
 		return
 	}
 
-	ps.Logger.Info(fmt.Sprintf("QUIC server is listening on port %d\n", ps.Config.NodeIP.Port))
+	ps.Logger.Info(fmt.Sprintf("QUIC server is listening on port %d", ps.Config.NodeIP.Port))
 
 	for {
+		// Accept incoming connections
 		connection, err := listener.Accept(context.Background())
 		if err != nil {
-			ps.Logger.Error(err.Error())
+			ps.Logger.Error(fmt.Sprintf("Failed to accept connection: %v", err))
 			continue
 		}
 
+		// Handle each connection in a separate goroutine
 		go func(session quic.Connection) {
 
+			// Accept a new stream from the connection
 			stream, err := session.AcceptStream(context.Background())
 			if err != nil {
-				ps.Logger.Error(err.Error())
 				return
 			}
 
-			data, err := config.ReceiveMessage(stream)
-			if err != nil {
-				ps.Logger.Error(err.Error())
-				return
-			}
+			// Handle the stream in a goroutine
+			go func(stream quic.Stream) {
 
-			header, err := config.UnmarshalHeader(data)
-			if err != nil {
-				ps.Logger.Error(err.Error())
-				return
-			}
-
-			videoName := header.RequestedVideo
-			header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
-
-			switch header.Type {
-			case protobuf.RequestType_ROUTINGTABLE:
-
-				HandleRouting(ps, connection, stream, header)
-				break
-
-			case protobuf.RequestType_RETRANSMIT:
-
-				serverMessage := header.GetServerVideoChunk() != nil
-				clientMessage := header.GetClientCommand() != nil
-
-				// check if the target is the client and check if the client is connected on this node
-				if serverMessage && ps.CurrentClientStreams[videoName] != nil && len(ps.CurrentClientStreams[videoName].Content) > 0 {
-
-					for _, client := range ps.CurrentClientStreams[videoName].Content {
-						ps.Logger.Info(fmt.Sprintf("Sending video chunk to %s\n", fmt.Sprintf("%s:%d", client.Ip, client.Port)))
-						// send the message to all interested clients
-						streaming.RedirectPacketToClient(data, fmt.Sprintf("%s:%d", client.Ip, client.Port))
-					}
-
-					break
+				// Receive message data
+				data, err := config.ReceiveMessage(stream)
+				if err != nil {
+					// Ignore the error, discard the stream
+					ps.Logger.Debug(fmt.Sprintf("Failed to receive message: %v", err))
+					return
 				}
 
-				// ------- EFFICIENT RETRANSMITION -------
+				// Unmarshal the message header
+				header, err := config.UnmarshalHeader(data)
+				if err != nil {
+					ps.Logger.Debug(fmt.Sprintf("Failed to unmarshal header: %v", err))
+					return
+				}
 
-				// make the nodes know what video they are about to stream
-				if clientMessage && header.RequestedVideo != "" {
-					// check if the node is already streaming and just add the client to the list
-          if header.GetClientCommand().Command == protobuf.PlayerCommand_STOP {
-            ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s' to stop\n", header.GetSender(), header.RequestedVideo))
-            // check if the node is already streaming and just add the client to the list
-            if exists := ps.CurrentNodeStreams[header.RequestedVideo]; exists != nil {
-              // now the current stream is going to be streamd to this node too
-              ps.CurrentNodeStreams[header.RequestedVideo].Remove(header.Sender)
-            } 
+				// Append the current node to the path
+				header.Path = fmt.Sprintf("%s,%s", header.Path, ps.Config.NodeName)
+
+				// Handle specific header types
+				switch header.Type {
+				case protobuf.RequestType_ROUTINGTABLE:
+					HandleRouting(ps, connection, stream, header)
+
+				case protobuf.RequestType_RETRANSMIT:
+
+					config.CloseStream(stream)
+
+					isVideoPacket := header.GetServerVideoChunk() != nil
+						ps.TransmitionService.SendPacket(header, ps.RoutingTable, false)
+
+          if isVideoPacket {
+            ps.Logger.Debug("Using the wrong protocol")
+            return
           }
 
-					ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
-					if exists := ps.CurrentNodeStreams[header.RequestedVideo]; exists != nil {
-						// now the current stream is going to be streamd to this node too
-
-						ps.CurrentNodeStreams[header.RequestedVideo] = &NodeList{}
-						ps.CurrentNodeStreams[header.RequestedVideo].Add(header.Sender)
-					} else {
-						ps.CurrentNodeStreams[header.RequestedVideo] = &NodeList{}
-						ps.CurrentNodeStreams[header.RequestedVideo].Add(header.Sender)
-					}
+				default:
+					ps.Logger.Debug(fmt.Sprintf("Unknown packet type: %v", header.Type))
 				}
 
-				// this is the stream
-				if serverMessage {
-
-					// streaming
-					video := header.RequestedVideo
-
-					if ps.CurrentNodeStreams[video] == nil {
-						break
-					}
-
-					for _, node := range ps.CurrentNodeStreams[video].Content {
-						// send the message to all interested clients
-						header.Target = node.Node
-						HandleRetransmit(ps, header)
-					}
-
-					break
-				}
-
-				// ------- EFFICIENT RETRANSMITION -------
-
-				HandleRetransmit(ps, header)
-				break
-			default:
-
-			}
+			}(stream)
 		}(connection)
 	}
+}
 
+func (ps *PresenceSystem) ListenForRetransmitInUDP() {
+	addr := ps.Config.NodeIP
+	udpPort := addr.Port - 1 // Assuming NodeIP.Port is an integer
+	addrString := fmt.Sprintf("%s:%d", addr.Ip, udpPort)
+
+	netAddr, err := net.ResolveUDPAddr("udp", addrString)
+	if err != nil {
+		ps.Logger.Error(fmt.Sprintf("Failed to resolve UDP address %s: %v", addrString, err))
+		return
+	}
+
+	conn, err := net.ListenUDP("udp", netAddr)
+	if err != nil {
+		ps.Logger.Error(fmt.Sprintf("Failed to listen on UDP address %s: %v", addrString, err))
+		return
+	}
+	defer conn.Close()
+	ps.Logger.Info(fmt.Sprintf("Listening for UDP retransmit on %s", addrString))
+
+	for {
+    data, _, err := config.ReceiveMessageUDP(conn)
+		if err != nil {
+			ps.Logger.Error(fmt.Sprintf("Error reading from UDP: %v", err))
+			continue // Consider breaking the loop or implementing a retry mechanism based on the error
+		}
+
+		go ps.handleUDPMessage(data)
+	}
+}
+
+func (ps *PresenceSystem) handleUDPMessage(data []byte) {
+	header, err := config.UnmarshalHeader(data)
+	if err != nil {
+		return
+	}
+
+	if header.Type != protobuf.RequestType_RETRANSMIT {
+		return
+	}
+
+	isVideoPacket := header.GetServerVideoChunk() != nil
+  ps.Logger.Info(fmt.Sprintf("Received video chunk from %s", header.GetSender()))
+	if !isVideoPacket {
+		// Retransmit the packet to neighbors
+		ps.TransmitionService.SendPacket(header, ps.RoutingTable, true)
+	}
+
+	// Send to clients via signal channel
+	callback := make(chan clientStreaming.CallbackData, 1) // Buffered channel to avoid blocking
+	ps.ClientService.Signal <- clientStreaming.SignalData{
+		Command:  clientStreaming.VIDEO,
+		Packet:   header,
+		Callback: callback,
+	}
+
+	select {
+	case data := <-callback:
+		// If canceled, retransmit to neighbors
+		if data.Cancel {
+			ps.TransmitionService.SendPacket(header, ps.RoutingTable, true)
+		}
+	case <-time.After(100 * time.Millisecond): // Timeout to avoid indefinite blocking
+		ps.Logger.Debug("Callback timed out, ignoring")
+	}
 }
 
 func (ps *PresenceSystem) ListenForClientsInUDP() {
@@ -249,35 +240,69 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 				return
 			}
 
+			videoName := header.RequestedVideo
+
 			// Process the message based on its type
 			switch header.Type {
 			case protobuf.RequestType_RETRANSMIT:
-				videoName := header.RequestedVideo
 
-				// check if the client is already connected to the server
-        isRequestingPlay := header.GetClientCommand().Command == protobuf.PlayerCommand_PLAY
+				isRequestingPlay := header.GetClientCommand().Command == protobuf.PlayerCommand_PLAY
 
-				if _, exists := ps.CurrentClientStreams[videoName]; exists && isRequestingPlay {
-					ps.Logger.Info(fmt.Sprintf("Client %s is already connected to the server\n", addr))
-					return
+				var operation clientStreaming.Command
+				if isRequestingPlay {
+					operation = clientStreaming.PLAY
+				} else {
+					operation = clientStreaming.STOP
 				}
 
-				// add the client to the list
-				ps.CurrentClientStreams[videoName] = &ClientList{}
-				ps.CurrentClientStreams[videoName].Add(config.ToInterface(remoteIp))
-				ps.Logger.Info(fmt.Sprintf("Received message from %s\n", addr))
+				ps.Logger.Info(fmt.Sprintf("Client %s is requesting video '%s'\n", header.GetSender(), header.RequestedVideo))
 
-				// modify data to set the sender to this node
-				header.Sender = ps.Config.NodeName
+				var callback chan clientStreaming.CallbackData = make(chan clientStreaming.CallbackData)
+				ps.ClientService.Signal <- clientStreaming.SignalData{
+					Command:   operation,
+					Video:     clientStreaming.Video(videoName),
+					UdpClient: config.ToInterface(remoteIp),
+					Callback:  callback,
+				}
 
-				HandleRetransmitFromClient(ps, header)
+				select {
+				case data := <-callback:
+					if data.Cancel {
 
-				// listen for clients in UDP, if their message takes more than 10 seconds, remove them from the NeighborList
-				// and if the list is empty, notify the server that it can stop streaming
+						ps.Logger.Info(fmt.Sprintf("Client %s is already connected to the server\n", addr))
+						return
+
+					} else {
+
+            success := ps.TransmitionService.SendPacket(data.Header, ps.RoutingTable, false)
+
+						if !success {
+							// stop
+							ps.ClientService.SendSignal(clientStreaming.SignalData{
+								Command:   clientStreaming.STOP,
+								Video:     clientStreaming.Video(videoName),
+								UdpClient: config.ToInterface(remoteIp),
+								Callback:  nil,
+							})
+						}
+
+					}
+				}
+
 			case protobuf.RequestType_HEARTBEAT:
 
-				for _, video := range ps.CurrentClientStreams {
-					video.ResetPing(header.ClientIp)
+				ps.ClientService.SendSignal(clientStreaming.SignalData{
+					Command:   clientStreaming.PING,
+					Video:     clientStreaming.Video(videoName),
+					UdpClient: config.ToInterface(remoteIp),
+					Callback:  nil,
+				})
+
+				select {
+				case data := <-ps.ClientService.SignalDead:
+					// isto não faz nada
+					ps.Logger.Info(fmt.Sprintf("Client %s is not pinging\n", data.Header.GetSender()))
+				default:
 				}
 
 			default:

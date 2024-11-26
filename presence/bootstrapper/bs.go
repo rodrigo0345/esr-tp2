@@ -10,14 +10,14 @@ import (
 )
 
 func BSGetNeighbors(cnf *config.AppConfigList, bsAddr *protobuf.Interface) ([]string, error) {
+  target := make([]string, 0)
   message := protobuf.Header{
     Type:           protobuf.RequestType_BOOTSTRAPER,
     Length:         0,
     Timestamp:      time.Now().UnixMilli(),
-    ClientIp:       "nil",
     Sender:         cnf.NodeName,
-    Target:         "nil",
-    RequestedVideo: "nil",
+    Target:         target,
+    RequestedVideo: "bootstrapper",
     Content: nil,
   }
 

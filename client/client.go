@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rodrigo0345/esr-tp2/config"
+	cnf "github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"google.golang.org/protobuf/proto"
 
@@ -21,7 +21,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func Client(config *config.AppConfigList) {
+func Client(config *cnf.AppConfigList) {
 	// Address to send messages
 	presenceNetworkEntrypointIp := config.Neighbors[0]
 	pneIpString := fmt.Sprintf("%s:%d", presenceNetworkEntrypointIp.Ip, presenceNetworkEntrypointIp.Port)
@@ -103,16 +103,14 @@ func Client(config *config.AppConfigList) {
 	// Goroutine for listening to incoming messages
 	go func() {
 		for {
-			buffer := make([]byte, 65535)
-			n, _, err := listener.ReadFromUDP(buffer)
+			data, _, err := cnf.ReceiveMessageUDP(listener)
 
 			if err != nil {
 				log.Printf("Error receiving message: %s\n", err)
 				continue
 			}
 
-			var msg protobuf.Header
-			err = proto.Unmarshal(buffer[:n], &msg)
+			msg, err := cnf.UnmarshalHeader(data)
 			if err != nil {
 				log.Printf("Error unmarshaling message: %s\n", err)
 				continue
@@ -158,7 +156,7 @@ func Client(config *config.AppConfigList) {
 
 // Helper function to send commands
 // Helper function to send commands
-func sendCommand(command, video, target string, conn net.Conn, config *config.AppConfigList, listenIp string, resetStats func()) {
+func sendCommand(command, video, target string, conn net.Conn, config *cnf.AppConfigList, listenIp string, resetStats func()) {
 	// Reset statistics before sending the command
 	resetStats()
 
@@ -166,10 +164,9 @@ func sendCommand(command, video, target string, conn net.Conn, config *config.Ap
 		Type:           protobuf.RequestType_RETRANSMIT,
 		Length:         0,
 		Timestamp:      time.Now().UnixMilli(),
-		ClientIp:       listenIp,
 		Sender:         "client",
 		Path:           config.NodeName,
-		Target:         target,
+		Target:         []string{target},
 		RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
 		Content: &protobuf.Header_ClientCommand{
 			ClientCommand: &protobuf.ClientCommand{

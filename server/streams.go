@@ -35,7 +35,13 @@ func (vs *VideoStreams) AddStream(video string, client *Client) *Stream {
 	// check if the stream already exists
 	for _, stream := range vs.Streams {
 		if stream.Video == video {
-			// add the client to the list
+      // check if the client is already in the list
+      for _, c := range stream.Clients {
+        if c.PresenceNodeName == client.PresenceNodeName {
+          return stream
+        }
+      }
+
 			stream.Clients = append(stream.Clients, client)
 			return stream
 		}

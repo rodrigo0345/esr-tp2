@@ -20,14 +20,14 @@ type NeighborResult struct {
 	RoutingTable *protobuf.DistanceVectorRouting
 }
 
-func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting, neighborsConnectionsMap *distancevectorrouting.ConnectionPool) *distancevectorrouting.DistanceVectorRouting {
+func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppConfigList, dvr *distancevectorrouting.DistanceVectorRouting) *distancevectorrouting.DistanceVectorRouting {
 
 	msg := protobuf.Header{
 		Type:      protobuf.RequestType_ROUTINGTABLE,
 		Length:    0,
 		Timestamp: time.Now().UnixMilli(),
 		Sender:    cnf.NodeIP.String(),
-		Target:    "",
+		Target:    make([]string, 0),
 	}
 	msg.Length = int32(proto.Size(&msg))
 
@@ -50,7 +50,10 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 			nb := distancevectorrouting.Interface{Interface: neighbor}
 
 			// Start a new QUIC connection and stream if it doesn't exist already
-			stream, conn, err := neighborsConnectionsMap.GetConnectionStream(nb.ToString())
+			stream, conn, err := config.StartConnStream(nb.ToString())
+      defer config.CloseStream(stream)
+      defer config.CloseConnection(conn)
+
 			if err != nil {
         // logger.Error(fmt.Sprintf("Error starting stream to %s: %v", nb.ToString(), err))
 				r, err := markNeighborAsDisconnected(dvr, nb)
@@ -60,8 +63,11 @@ func (nbl *NeighborList) PingNeighbors(logger *config.Logger, cnf *config.AppCon
 				results <- r
 				return
 			}
+      
+      target := make([]string, 1)
+      target[0] = nb.ToString()
 
-			msg.Target = nb.ToString()
+			msg.Target = target
 			msg.Content = &protobuf.Header_DistanceVectorRouting{
 				DistanceVectorRouting: dvr.Copy().Dvr,
 			}

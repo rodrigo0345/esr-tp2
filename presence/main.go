@@ -11,24 +11,28 @@ import (
 
 func Presence(cnf *config.AppConfigList) {
 
-  // Boostrap the neighbors
-  NeighborList, err := bootstrapper.BSGetNeighbors(cnf, cnf.Neighbors[0])
+	if !cnf.Local {
+		// Boostrap the neighbors
+		NeighborList, err := bootstrapper.BSGetNeighbors(cnf, cnf.Neighbors[0])
 
-  if err != nil {
-    fmt.Printf("Error getting neighbors: %s\n", err.Error())
-    return
-  }
+		if err != nil {
+			fmt.Printf("Error getting neighbors: %s\n", err.Error())
+			return
+		}
 
-  cnf.Neighbors = []*protobuf.Interface{}
-  for _, neighbor := range NeighborList {
-    fmt.Printf("Neighbor: %s\n", neighbor)
-    nb := config.ToInterface(neighbor)
-    cnf.Neighbors = append(cnf.Neighbors, nb)
-  }
+		cnf.Neighbors = []*protobuf.Interface{}
+		for _, neighbor := range NeighborList {
+			fmt.Printf("Neighbor: %s\n", neighbor)
+			nb := config.ToInterface(neighbor)
+			cnf.Neighbors = append(cnf.Neighbors, nb)
+		}
+	}
 
 	presenceSystem := NewPresenceSystem(cnf)
-	go presenceSystem.HeartBeatNeighbors(1)
-	go presenceSystem.HeartBeatClients(50)
+
+	go presenceSystem.HeartBeatNeighbors(2)
+	go presenceSystem.SignalDeadClientsService()
 	go presenceSystem.ListenForClients()
+  go presenceSystem.ListenForRetransmitInUDP()
 	presenceSystem.ListenForClientsInUDP()
 }
