@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"log"
 	"math"
@@ -18,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -46,7 +48,6 @@ func Client(config *cnf.AppConfigList) {
 	if err != nil {
 		log.Fatalf("Failed to create UDP listener: %v", err)
 	}
-	defer listener.Close()
 
 	// Create the app and window
 	myApp := app.New()
@@ -64,9 +65,15 @@ func Client(config *cnf.AppConfigList) {
 		prevDelay          float64
 		jittersum          float64
 		packetCount        int
+		startTime          = time.Now()
+		statsMutex         sync.Mutex
 		totalSent          int
 		totalBytesReceived int64
-		statsMutex         sync.Mutex
+		frameDisplayCount  int
+		fps                float64
+		lastFpsUpdate      time.Time = time.Now()
+		bufferMutex        sync.Mutex
+		frameBuffer        []*image.Image // Changed to slice of pointers
 	)
 
 	resetStats := func() {
@@ -78,22 +85,27 @@ func Client(config *cnf.AppConfigList) {
 		jittersum = 0.0
 		prevDelay = 0.0
 		totalBytesReceived = 0
+		frameDisplayCount = 0
+		fps = 0
+		lastFpsUpdate = time.Now() // Reset FPS timer
+		startTime = time.Now()     // Reset start time for elapsed
 	}
 
 	// Entry widgets and buttons
 	messageEntry := widget.NewEntry()
-	messageEntry.SetPlaceHolder("Enter video")
+	messageEntry.SetPlaceHolder("Enter video, 'lol' or 'demo'")
 	targetEntry := widget.NewEntry()
-	targetEntry.SetPlaceHolder("Enter target")
-	sendButton := widget.NewButton("Send", func() {
+	targetEntry.SetPlaceHolder("Enter target, 's1'")
+	// Buttons with enhanced visual design
+	sendButton := widget.NewButtonWithIcon("Send", theme.ConfirmIcon(), func() {
 		sendCommand("PLAY", messageEntry.Text, targetEntry.Text, conn, config, listenIp, resetStats)
 	})
-	cancelButton := widget.NewButton("Stop", func() {
+	cancelButton := widget.NewButtonWithIcon("Stop", theme.CancelIcon(), func() {
 		sendCommand("STOP", messageEntry.Text, targetEntry.Text, conn, config, listenIp, resetStats)
+		resetStats()
 	})
-
-	statsButton := widget.NewButton("Statistics", func() {
-		showStatsWindow(myApp, &statsMutex, &packetCount, &jittersum, &totalSent, &totalBytesReceived)
+	statsButton := widget.NewButtonWithIcon("Statistics", theme.InfoIcon(), func() {
+		showStatsWindow(myApp, startTime, &packetCount, &jittersum, &statsMutex, &totalSent, &totalBytesReceived, &fps)
 	})
 
 	controls := container.NewVBox(messageEntry, targetEntry, sendButton, cancelButton, statsButton, pathLabel)
@@ -106,6 +118,7 @@ func Client(config *cnf.AppConfigList) {
 	go func() {
 		for {
 			data, _, err := cnf.ReceiveMessageUDP(listener)
+
 			if err != nil {
 				log.Printf("Error receiving message: %s\n", err)
 				continue
@@ -132,8 +145,10 @@ func Client(config *cnf.AppConfigList) {
 				continue
 			}
 
-			imgCanvas.Image = frame
-			imgCanvas.Refresh()
+			// Lock the buffer to safely append the new frame
+			bufferMutex.Lock()
+			frameBuffer = append(frameBuffer, &frame)
+			bufferMutex.Unlock()
 
 			// Jitter calculation
 			receivedTime := time.Now().UnixMilli()
@@ -147,9 +162,45 @@ func Client(config *cnf.AppConfigList) {
 			}
 			prevDelay = currentDelay
 			packetCount++
-			totalSent = int(msg.GetServerVideoChunk().GetSequenceNumber())
+			totalSent = int(msg.GetServerVideoChunk().GetSequenceNumber()) // Update totalSent with the sequence number
 			totalBytesReceived += int64(len(videoData))
 			statsMutex.Unlock()
+		}
+	}()
+
+	// Playback loop for frames in the buffer
+	go func() {
+		ticker := time.NewTicker(33 * time.Millisecond) // Approx 30 FPS
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				bufferMutex.Lock()
+				if len(frameBuffer) > 0 {
+					frame := *frameBuffer[0]
+					frameBuffer = frameBuffer[1:]
+
+					bufferMutex.Unlock()
+
+					imgCanvas.Image = frame
+					imgCanvas.Refresh()
+
+					// Update FPS
+					statsMutex.Lock()
+					frameDisplayCount++
+					elapsed := time.Since(lastFpsUpdate).Seconds()
+					if elapsed >= 1.0 {
+						// Update FPS correctly
+						fps = float64(frameDisplayCount) / elapsed
+						frameDisplayCount = 0
+						lastFpsUpdate = time.Now()
+					}
+					statsMutex.Unlock()
+				} else {
+					bufferMutex.Unlock()
+				}
+			}
 		}
 	}()
 
@@ -189,47 +240,60 @@ func sendCommand(command, video, target string, conn net.Conn, config *cnf.AppCo
 }
 
 // Show statistics in a new window
-func showStatsWindow(app fyne.App, statsMutex *sync.Mutex, packetCount *int, jittersum *float64, totalSent *int, totalBytesReceived *int64) {
+func showStatsWindow(app fyne.App, startTime time.Time, packetCount *int, jittersum *float64, statsMutex *sync.Mutex, totalSent *int, totalBytesReceived *int64, fps *float64) {
 	statsWindow := app.NewWindow("Statistics")
 	statsWindow.Resize(fyne.NewSize(400, 300))
 
-	elapsedTimeLabel := widget.NewLabel("")
-	packetCountLabel := widget.NewLabel("")
-	totalBytesLabel := widget.NewLabel("")
-	avgJitterLabel := widget.NewLabel("")
-	packetLossRate := widget.NewLabel("")
+	// Labels to display the stats
+	elapsedTimeLabel := widget.NewLabel("Elapsed Time: 0.00 s")
+	packetCountLabel := widget.NewLabel(fmt.Sprintf("Packets Received: %d", *packetCount))
+	totalBytesLabel := widget.NewLabel(fmt.Sprintf("Total Bytes: %d", *totalBytesReceived))
+	avgJitterLabel := widget.NewLabel(fmt.Sprintf("Avg Jitter: %.2f ms", *jittersum/float64(*packetCount)))
+	packetLossRate := widget.NewLabel(fmt.Sprintf("Packet Loss: %.2f%%", 0.0))
+	fpsLabel := widget.NewLabel(fmt.Sprintf("FPS: %.2f", *fps))
+	throughputLabel := widget.NewLabel("Throughput: 0 KB/s")
 
-	statsContent := container.NewVBox(
-		elapsedTimeLabel,
-		packetCountLabel,
-		totalBytesLabel,
-		avgJitterLabel,
-		packetLossRate,
-	)
-	statsWindow.SetContent(statsContent)
+	// Add the labels to the window
+	statsWindow.SetContent(container.NewVBox(elapsedTimeLabel, packetCountLabel, totalBytesLabel, avgJitterLabel, packetLossRate, throughputLabel, fpsLabel))
 
-	// Update statistics periodically
+	// Variables for packet loss calculation
+	var lastPacketCount int
+	var lastTotalSent int
+	var packetLossRateLast5s float64
+
+	// Update statistics every second
 	go func() {
-		for range time.Tick(500 * time.Millisecond) {
-			statsMutex.Lock()
-			avgJitter := 0.0
-			if *packetCount > 1 {
-				avgJitter = *jittersum / float64(*packetCount-1)
-			}
-			packetLoss := 0.0
-			if *totalSent > 0 {
-				lostPackets := *totalSent - *packetCount
-				packetLoss = (float64(lostPackets) / float64(*totalSent)) * 100
-			}
-			totalBytes := *totalBytesReceived
-			statsMutex.Unlock()
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
 
-			elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f seconds", time.Since(time.Now()).Seconds()))
+		for range ticker.C {
+			statsMutex.Lock()
+
+			// Calculate packet loss rate over the last 5 seconds
+			if int(time.Since(startTime).Seconds())%5 == 0 {
+				packetLossRateLast5s = float64(*totalSent-lastTotalSent-*packetCount+lastPacketCount) / float64(*totalSent-lastTotalSent) * 100
+				packetLossRate.SetText(fmt.Sprintf("Packets Lost in Last 5 Seconds: %.2f%%", packetLossRateLast5s))
+			}
+
+			// Store the current values for the next 5-second interval calculation
+			lastPacketCount = *packetCount
+			lastTotalSent = *totalSent
+
+			// Calculate throughput in KB/s
+			throughput := float64(*totalBytesReceived-int64(lastTotalSent)) / 1024.0 // KB per second
+			throughputLabel.SetText(fmt.Sprintf("Throughput: %.2f KB/s", throughput))
+
+			// Update the labels with the current statistics
+			elapsed := time.Since(startTime).Seconds()
+			elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f s", elapsed))
 			packetCountLabel.SetText(fmt.Sprintf("Packets Received: %d", *packetCount))
-			totalBytesLabel.SetText(fmt.Sprintf("Total Bytes: %d", totalBytes))
-			avgJitterLabel.SetText(fmt.Sprintf("Avg Jitter: %.2f ms", avgJitter))
-			packetLossRate.SetText(fmt.Sprintf("Packet Loss: %.2f%%", packetLoss))
+			totalBytesLabel.SetText(fmt.Sprintf("Total Bytes: %d B", *totalBytesReceived))
+			avgJitterLabel.SetText(fmt.Sprintf("Avg Jitter: %.2f ms", *jittersum/float64(*packetCount)))
+			fpsLabel.SetText(fmt.Sprintf("FPS: %.2f", *fps))
+
+			statsMutex.Unlock()
 		}
 	}()
+
 	statsWindow.Show()
 }
