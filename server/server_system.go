@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"github.com/rodrigo0345/esr-tp2/presence"
 	"github.com/rodrigo0345/esr-tp2/server/boostrapper"
+	"google.golang.org/protobuf/proto"
 )
 
 type ServerSystem struct {
@@ -44,6 +46,55 @@ func NewServerSystem(cnf *config.AppConfigList) *ServerSystem {
 
 func (ss *ServerSystem) HeartBeatNeighbors(seconds int) {
 	ss.PresenceSystem.HeartBeatNeighbors(seconds)
+}
+
+func (ss *ServerSystem) BsClients() {
+	addr := ss.PresenceSystem.Config.NodeIP
+	udpPort := addr.Port - 1000 // Assuming NodeIP.Port is an integer
+	addrString := fmt.Sprintf("%s:%d", addr.Ip, udpPort)
+
+	netAddr, err := net.ResolveUDPAddr("udp", addrString)
+	if err != nil {
+		ss.Logger.Error(fmt.Sprintf("Failed to resolve UDP address %s: %v", addrString, err))
+		return
+	}
+
+	conn, err := net.ListenUDP("udp", netAddr)
+	if err != nil {
+		ss.Logger.Error(fmt.Sprintf("Failed to listen on UDP address %s: %v", addrString, err))
+		return
+	}
+	defer conn.Close()
+	ss.Logger.Info(fmt.Sprintf("Listening for UDP retransmit on %s", addrString))
+
+	for {
+    data, remoteAddr, err := config.ReceiveMessageUDP(conn)
+		if err != nil {
+			ss.Logger.Error(fmt.Sprintf("Error reading from UDP: %v", err))
+			continue // Consider breaking the loop or implementing a retry mechanism based on the error
+		}
+
+    remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP, 2222)
+
+    go func(data []byte, remoteAddr string){
+
+      header := &protobuf.Header{}
+      err = proto.Unmarshal(data, header)
+
+      if err != nil {
+        ss.Logger.Error(fmt.Sprintf("Error unmarshalling UDP message: %v", err))
+        return
+      }
+
+      switch header.Type {
+      case protobuf.RequestType_CLIENT_PING:
+        ss.Bootstrapper.BootstrapClients(header, remoteIp)
+        break
+      default:
+    }
+    } (data, remoteIp)
+
+	}
 }
 
 func (ss *ServerSystem) ListenForClients() {

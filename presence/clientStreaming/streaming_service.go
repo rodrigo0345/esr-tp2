@@ -23,7 +23,8 @@ type SignalData struct {
 	Video     Video
 	UdpClient *protobuf.Interface
 	Callback  Callback
-  Packet    *protobuf.Header
+	Packet    *protobuf.Header
+	MyIp      string
 }
 
 type UdpClient struct {
@@ -34,20 +35,21 @@ type UdpClient struct {
 type Signal chan SignalData
 
 const (
-	PLAY Command = "play"
-	STOP Command = "stop"
-  PING Command = "ping"
-  VIDEO Command = "video"
+	PLAY      Command = "play"
+	STOP      Command = "stop"
+	HEARTBEAT Command = "heartbeat"
+	VIDEO     Command = "video"
+	PING      Command = "ping"
 )
 
 type StreamingService struct {
 	sync.Mutex
 	UdpClients      map[Video][]UdpClient
 	InterestedNodes map[Video][]Node
-  Logger          *config.Logger
-  Config          *config.AppConfigList
+	Logger          *config.Logger
+	Config          *config.AppConfigList
 	Signal          Signal
-  SignalDead      Callback
+	SignalDead      Callback
 }
 
 func (ss *StreamingService) RunBackgroundRoutine(seconds time.Duration) {
@@ -61,19 +63,21 @@ func (ss *StreamingService) RunBackgroundRoutine(seconds time.Duration) {
 					ss.Play(signal.Video, signal.UdpClient, signal.Callback)
 				case STOP:
 					ss.Stop(signal.Video, signal.UdpClient, signal.Callback)
-        case PING:
-          ss.ClientPing(signal.Video, signal.UdpClient, signal.Callback)
-        case VIDEO:
-          ss.SendToClient(signal.Callback, signal.Packet)
+				case HEARTBEAT:
+					ss.ClientHeartbeat(signal.Video, signal.UdpClient, signal.Callback)
+				case VIDEO:
+					ss.SendToClient(signal.Callback, signal.Packet)
+				case PING:
+					ss.ClientPing(signal.MyIp, signal.UdpClient, signal.Callback)
 				}
 			}
 		}
 	}()
 
-  // check inactive clients 
+	// check inactive clients
 	go func() {
 		for {
-      ss.CheckInactiveClients(seconds)
+			ss.CheckInactiveClients(seconds)
 			time.Sleep(time.Second * seconds)
 		}
 	}()
@@ -93,12 +97,12 @@ func (ss *StreamingService) Unlock() {
 
 func NewStreamingService(cnf *config.AppConfigList, logger *config.Logger) *StreamingService {
 	return &StreamingService{
-    UdpClients:      make(map[Video][]UdpClient),
+		UdpClients:      make(map[Video][]UdpClient),
 		InterestedNodes: make(map[Video][]Node),
-    Logger: logger, 
-    Config: cnf,
-    SignalDead:      make(Callback),
-    Signal:          make(Signal),
+		Logger:          logger,
+		Config:          cnf,
+		SignalDead:      make(Callback),
+		Signal:          make(Signal),
 	}
 }
 
@@ -114,25 +118,25 @@ func (ss *StreamingService) CheckInactiveClients(seconds time.Duration) {
 			if time.Since(client.LastSeen) > time.Second*seconds {
 				ss.RemoveUdpClient(video, client)
 
-        // notifies the network
-        ss.SignalDead <- CallbackData {
-          Header: ss.PrepareMessageForDeadClient(video, client),
-          Cancel: false,
-        }
+				// notifies the network
+				ss.SignalDead <- CallbackData{
+					Header: ss.PrepareMessageForDeadClient(video, client),
+					Cancel: false,
+				}
 			}
 		}
 	}
 }
 
 func (ss *StreamingService) PrepareMessageForDeadClient(video Video, client UdpClient) *protobuf.Header {
-  target := make([]string, 1)
-  target[0] = "s1"
+	target := make([]string, 1)
+	target[0] = "s1"
 	header := &protobuf.Header{
-		Type:      protobuf.RequestType_RETRANSMIT,
-		Length:    0,
-		Timestamp: time.Now().UnixMilli(),
-		Sender:    ss.Config.NodeName,
-		Target:    target, // TODO: change this and make it dynamic
+		Type:           protobuf.RequestType_RETRANSMIT,
+		Length:         0,
+		Timestamp:      time.Now().UnixMilli(),
+		Sender:         ss.Config.NodeName,
+		Target:         target, // TODO: change this and make it dynamic
 		RequestedVideo: string(video),
 		Content: &protobuf.Header_ClientCommand{
 			ClientCommand: &protobuf.ClientCommand{
@@ -142,17 +146,17 @@ func (ss *StreamingService) PrepareMessageForDeadClient(video Video, client UdpC
 		},
 	}
 	header.Length = int32(proto.Size(header))
-  return header
+	return header
 }
 
 func (ss *StreamingService) MarkClientAsSeen(client UdpClient) {
-  for _, c := range ss.UdpClients {
-    for _, cl := range c {
-      if cl.String() == client.String() {
-        cl.LastSeen = time.Now()
-      }
-    }
-  }
+	for _, c := range ss.UdpClients {
+		for _, cl := range c {
+			if cl.String() == client.String() {
+				cl.LastSeen = time.Now()
+			}
+		}
+	}
 }
 
 func (ss *StreamingService) RemoveUdpClient(video Video, client UdpClient) {
@@ -165,10 +169,10 @@ func (ss *StreamingService) RemoveUdpClient(video Video, client UdpClient) {
 		}
 	}
 
-  // if the list is empty, remove the video
-  if len(ss.UdpClients[video]) == 0 {
-    delete(ss.UdpClients, video)
-  }
+	// if the list is empty, remove the video
+	if len(ss.UdpClients[video]) == 0 {
+		delete(ss.UdpClients, video)
+	}
 }
 
 func (ss *StreamingService) AddInterestedNode(video Video, node Node) {

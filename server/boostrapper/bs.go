@@ -73,3 +73,54 @@ func (bs *Bootstrapper) Bootstrap(session quic.Connection, stream quic.Stream, h
 
 	bs.logger.Info("Successfully sent node neighbors data to client.")
 }
+
+func (bs *Bootstrapper) BootstrapClients(header *protobuf.Header, remoteIp string) {
+
+  bs.logger.Info("Received Bootstrapper request.")
+
+	// Read the JSON file
+	data, err := os.ReadFile(bs.fileName)
+	if err != nil {
+		bs.logger.Error("Error reading file: " + err.Error())
+		return
+	}
+
+	// Parse the JSON data
+	var nodeNeighbors map[string][]string
+	err = json.Unmarshal(data, &nodeNeighbors)
+	if err != nil {
+		bs.logger.Error("Error parsing JSON: " + err.Error())
+		return
+	}
+
+  bs.logger.Info(fmt.Sprintf("Sending Neighbors: %v\n", nodeNeighbors[header.Sender]))
+  targets := make([]string, 1)
+
+	message := protobuf.Header{
+		Type:           protobuf.RequestType_CLIENT_PING,
+		Length:         0,
+		Timestamp:      time.Now().UnixMilli(),
+		Sender:         "bs",
+		Target:         targets,
+		RequestedVideo: "nil",
+		Content: &protobuf.Header_BootstraperResult{
+			BootstraperResult: &protobuf.BootstraperResult{
+				Neighbors: nodeNeighbors[header.Sender],
+			},
+		},
+	}
+  message.Length = int32(proto.Size(&message))
+  message.Target[0] = remoteIp
+
+  data, err = proto.Marshal(&message)
+
+  if err != nil {
+    bs.logger.Error(err.Error())
+    return
+  }
+
+  bs.logger.Debug(fmt.Sprintf("Sending neighbors to client in %s", remoteIp))
+  config.SendMessageUDP(remoteIp, data)
+
+	bs.logger.Info("Successfully sent node neighbors data to client.")
+}

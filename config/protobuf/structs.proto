@@ -27,6 +27,7 @@ message Header {
   string RequestedVideo = 10;
   string path = 12;
   int64 seq_id = 13;
+  int32 hops = 14;
 }
 
 enum RequestType {
@@ -36,6 +37,8 @@ enum RequestType {
   HEARTBEAT = 2;
   BOOTSTRAPER = 3;
   FAILED = 4;
+
+  CLIENT_PING = 5;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -1,16 +1,27 @@
 package clientStreaming
 
 import (
-	"time"
-
+	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
+	"google.golang.org/protobuf/proto"
 )
 
-// this is directly called by the client
-func (ss *StreamingService) ClientPing(video Video, udpClient *protobuf.Interface, callback Callback) {
+func (ss *StreamingService) ClientPing(myIp string, udpClient *protobuf.Interface, callback Callback) {
 
-  client := UdpClient{Interface: udpClient, LastSeen: time.Now()}
-  ss.MarkClientAsSeen(client)
+  msg := &protobuf.Header{
+    Type: protobuf.RequestType_CLIENT_PING,
+    Sender: myIp,
+    Target: []string{udpClient.Ip},
+  }
+
+  data, err := proto.Marshal(msg)
+
+  if err != nil {
+    ss.Logger.Error(err.Error())
+    return
+  }
+
+  config.SendMessageUDP(udpClient.Ip, data)
 
   callback <- CallbackData {
     Header: nil,
