@@ -1,6 +1,8 @@
 package clientStreaming
 
 import (
+	"fmt"
+
 	"github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"google.golang.org/protobuf/proto"
@@ -21,7 +23,7 @@ func (ss *StreamingService) ClientPing(myIp string, udpClient *protobuf.Interfac
     return
   }
 
-  config.SendMessageUDP(udpClient.Ip, data)
+  config.SendMessageUDP(fmt.Sprintf("%s:%d", udpClient.Ip, udpClient.Port), data)
 
   callback <- CallbackData {
     Header: nil,

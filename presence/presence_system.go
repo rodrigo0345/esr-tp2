@@ -248,6 +248,8 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			// Process the message based on its type
 			switch header.Type {
 			case protobuf.RequestType_CLIENT_PING:
+
+        ps.Logger.Debug(fmt.Sprintf("Received PING from %s", remoteIp))
 				var callback chan clientStreaming.CallbackData = make(chan clientStreaming.CallbackData)
 
 				ps.ClientService.Signal <- clientStreaming.SignalData{

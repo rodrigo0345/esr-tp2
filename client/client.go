@@ -42,9 +42,16 @@ func Client(cnf *cnf.AppConfigList) {
 
 	go RequestNeighbors(cnf, bsAddr, bsSystem)
 
+  createUI := false
+  var bestPop *bootstrapsystem.Pop = nil
 	// main listener loop
 	func() {
 		for {
+      if createUI {
+        createUI = false
+        updateUI = ui.StartUI(bestPop.Addr, cnf)
+      }
+
 			data, _, err := config.ReceiveMessageUDP(listener)
 
 			if err != nil {
@@ -65,6 +72,7 @@ func Client(cnf *cnf.AppConfigList) {
 
 					// bootrapper logic
 					// ping all the pops and find the best one
+
 					if msg.Sender == "bs" {
 
 						logger.Debug("Received Neighbors from bootstraper")
@@ -76,14 +84,16 @@ func Client(cnf *cnf.AppConfigList) {
 							if result.Success {
 								logger.Debug("Successfully received neighbors from bootstraper")
 								ProcessBestPop(cnf, msg, bsSystem)
+								return
 							}
 
-              logger.Debug("Failed to receive neighbors from bootstraper")
+							logger.Debug("Failed to receive neighbors from bootstraper")
 						}
 						return
 					}
 
 					logger.Debug("Received POP Ping")
+
 					callback := make(chan *bootstrapsystem.CallbackData)
 					bsSystem.Command <- &bootstrapsystem.BsCommand{
 						Command: bootstrapsystem.PROCESS_PING,
@@ -96,12 +106,11 @@ func Client(cnf *cnf.AppConfigList) {
 					select {
 					case data := <-callback:
 						if data.Success {
-							bestPop := bsSystem.GetBestPop()
-							updateUI = ui.StartUI(bestPop.Addr, cnf)
+							bestPop = bsSystem.GetBestPop()
+              createUI = true
 						} else {
 							panic("Error bootstraping")
 						}
-						break
 					}
 
 					// find the best pop
@@ -124,7 +133,7 @@ func Client(cnf *cnf.AppConfigList) {
 
 func RequestNeighbors(cnf *cnf.AppConfigList, bsAddr string, bsSystem *bootstrapsystem.BootstrapSystem) {
 
-  loop := true
+	loop := true
 	for loop {
 		callback := make(chan *bootstrapsystem.CallbackData)
 		bsSystem.Command <- &bootstrapsystem.BsCommand{
@@ -139,11 +148,11 @@ func RequestNeighbors(cnf *cnf.AppConfigList, bsAddr string, bsSystem *bootstrap
 		case _ = <-callback:
 		}
 
-    if bsSystem.Neighbors != nil {
-      loop = false
-    }
+		if bsSystem.Neighbors != nil {
+			loop = false
+		}
 
-    time.Sleep(time.Second * 3)
+		time.Sleep(time.Second * 3)
 	}
 }
 
@@ -161,15 +170,28 @@ func ProcessNeighbors(cnf *cnf.AppConfigList, msg *protobuf.Header, bsSystem *bo
 }
 
 func ProcessBestPop(cnf *cnf.AppConfigList, msg *protobuf.Header, bsSystem *bootstrapsystem.BootstrapSystem) {
-	callback := make(chan *bootstrapsystem.CallbackData)
-	bsSystem.Command <- &bootstrapsystem.BsCommand{
-		Command: bootstrapsystem.REQUEST_PING,
-		Data: &bootstrapsystem.ChannelData{
-			Msg:      msg,
-			Callback: callback,
-		},
+
+	loop := true
+	for loop {
+		callback := make(chan *bootstrapsystem.CallbackData)
+		bsSystem.Command <- &bootstrapsystem.BsCommand{
+			Command: bootstrapsystem.REQUEST_PING,
+			Data: &bootstrapsystem.ChannelData{
+				Msg:      msg,
+				Callback: callback,
+			},
+		}
+		select {
+    case data := <-callback:
+      if data.Success {
+      }
+		}
+
+    if bsSystem.BestPop != nil {
+      loop = false
+    }
+
+    time.Sleep(time.Second * 3)
 	}
-	select {
-	case _ = <-callback:
-	}
+
 }
