@@ -42,15 +42,11 @@ func Client(cnf *cnf.AppConfigList) {
 
 	go RequestNeighbors(cnf, bsAddr, bsSystem)
 
-  createUI := false
-  var bestPop *bootstrapsystem.Pop = nil
+	createUI := false
+	var bestPop *bootstrapsystem.Pop = nil
 	// main listener loop
-	func() {
+	go func() {
 		for {
-      if createUI {
-        createUI = false
-        updateUI = ui.StartUI(bestPop.Addr, cnf)
-      }
 
 			data, _, err := config.ReceiveMessageUDP(listener)
 
@@ -72,7 +68,6 @@ func Client(cnf *cnf.AppConfigList) {
 
 					// bootrapper logic
 					// ping all the pops and find the best one
-
 					if msg.Sender == "bs" {
 
 						logger.Debug("Received Neighbors from bootstraper")
@@ -107,17 +102,20 @@ func Client(cnf *cnf.AppConfigList) {
 					case data := <-callback:
 						if data.Success {
 							bestPop = bsSystem.GetBestPop()
-              createUI = true
+							createUI = true
 						} else {
 							panic("Error bootstraping")
 						}
 					}
 
 					// find the best pop
-					break
+					return
 				case protobuf.RequestType_RETRANSMIT:
 
+					logger.Debug("Received video chunk")
+
 					if updateUI == nil {
+            logger.Error("No UI to update")
 						return
 					}
 
@@ -129,6 +127,13 @@ func Client(cnf *cnf.AppConfigList) {
 		}
 	}()
 
+	for {
+		if createUI {
+			createUI = false
+			updateUI = ui.StartUI(bestPop.Addr, cnf)
+      return
+		}
+	}
 }
 
 func RequestNeighbors(cnf *cnf.AppConfigList, bsAddr string, bsSystem *bootstrapsystem.BootstrapSystem) {
@@ -182,16 +187,16 @@ func ProcessBestPop(cnf *cnf.AppConfigList, msg *protobuf.Header, bsSystem *boot
 			},
 		}
 		select {
-    case data := <-callback:
-      if data.Success {
-      }
+		case data := <-callback:
+			if data.Success {
+			}
 		}
 
-    if bsSystem.BestPop != nil {
-      loop = false
-    }
+		if bsSystem.BestPop != nil {
+			loop = false
+		}
 
-    time.Sleep(time.Second * 3)
+		time.Sleep(time.Second * 3)
 	}
 
 }

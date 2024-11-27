@@ -6,7 +6,6 @@ import (
 	"image/jpeg"
 	"log"
 	"math"
-	"net"
 	"sync"
 	"time"
 
@@ -31,13 +30,6 @@ func StartUI(bestPopAddr string, cnf *config.AppConfigList) func(*protobuf.Heade
 
 	// Create a label to display the msg.Path
 	pathLabel := widget.NewLabel("")
-
-	// Setup a UDP connection for sending
-	conn, err := net.Dial("udp", bestPopAddr)
-	if err != nil {
-		log.Fatalf("Failed to dial: %v", err)
-	}
-	defer conn.Close()
 
 	// Statistics variables
 	var (
@@ -65,10 +57,10 @@ func StartUI(bestPopAddr string, cnf *config.AppConfigList) func(*protobuf.Heade
 	targetEntry := widget.NewEntry()
 	targetEntry.SetPlaceHolder("Enter target")
 	sendButton := widget.NewButton("Send", func() {
-		sendCommand("PLAY", messageEntry.Text, targetEntry.Text, conn, cnf, bestPopAddr, resetStats)
+		sendCommand("PLAY", messageEntry.Text, targetEntry.Text, bestPopAddr, cnf, bestPopAddr, resetStats)
 	})
 	cancelButton := widget.NewButton("Stop", func() {
-		sendCommand("STOP", messageEntry.Text, targetEntry.Text, conn, cnf, bestPopAddr, resetStats)
+		sendCommand("STOP", messageEntry.Text, targetEntry.Text, bestPopAddr, cnf, bestPopAddr, resetStats)
 	})
 
 	statsButton := widget.NewButton("Statistics", func() {
@@ -117,7 +109,7 @@ func StartUI(bestPopAddr string, cnf *config.AppConfigList) func(*protobuf.Heade
 }
 
 // Helper function to send commands
-func sendCommand(command, video, target string, conn net.Conn, config *config.AppConfigList, listenIp string, resetStats func()) {
+func sendCommand(command, video, target string, bestPopAddr string, cnf *config.AppConfigList, listenIp string, resetStats func()) {
 	// Reset statistics before sending the command
 	resetStats()
 
@@ -126,7 +118,7 @@ func sendCommand(command, video, target string, conn net.Conn, config *config.Ap
 		Length:         0,
 		Timestamp:      time.Now().UnixMilli(),
 		Sender:         "client",
-		Path:           config.NodeName,
+		Path:           cnf.NodeName,
 		Target:         []string{target},
 		RequestedVideo: fmt.Sprintf("%s.Mjpeg", video),
 		Content: &protobuf.Header_ClientCommand{
@@ -142,7 +134,7 @@ func sendCommand(command, video, target string, conn net.Conn, config *config.Ap
 		log.Printf("Error marshaling message: %v", err)
 		return
 	}
-	_, err = conn.Write(data)
+  config.SendMessageUDP(bestPopAddr, data)
 	if err != nil {
 		log.Printf("Failed to send message: %v", err)
 	}
