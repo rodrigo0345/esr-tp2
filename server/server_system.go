@@ -73,6 +73,9 @@ func (ss *ServerSystem) BsClients() {
 			ss.Logger.Error(fmt.Sprintf("Error reading from UDP: %v", err))
 			continue // Consider breaking the loop or implementing a retry mechanism based on the error
 		}
+    if remoteAddr == nil {
+      continue
+    }
 
 		remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP, 2222)
 

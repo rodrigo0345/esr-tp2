@@ -325,8 +325,6 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
         port := header.ClientPort
 
         ip := strings.Split(remoteIp, ":")[0]
-        fmt.Println(ip, port)
-
         remoteIp := fmt.Sprintf("%s:%s", ip, port)
 
         callback := make(chan clientStreaming.CallbackData)
