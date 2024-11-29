@@ -32,7 +32,6 @@ func (ss *StreamingService) SendToClient(callback Callback, header *protobuf.Hea
 		}
 
 		udpAddr := fmt.Sprintf("%s:%d", client.Ip, client.Port)
-    ss.Logger.Info(fmt.Sprintf("Sending via UDP to %s", udpAddr))
 		go config.SendMessageUDP(udpAddr, data)
 	}
 

@@ -6,6 +6,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/rodrigo0345/esr-tp2/config"
@@ -218,20 +219,54 @@ func (dvr *DistanceVectorRouting) Unmarshal(data []byte) error {
 }
 
 func (dvr *DistanceVectorRouting) Print(logger *config.Logger) {
-	logger.Info("Routing Table:")
+	logger.Info("\n---------------\nRouting Table:")
 
-	// Coletar as entradas em uma slice para classificação
+	// Collect entries in a slice for sorting
 	entries := make([]string, 0, len(dvr.Dvr.Entries))
 	for dest := range dvr.Dvr.Entries {
 		entries = append(entries, dest)
 	}
 
-	// Ordenar as entradas por nome (destino)
+	// Sort entries by destination name
 	sort.Strings(entries)
 
-	// Imprimir a tabela de roteamento ordenada
+	// Calculate column widths
+	destWidth := 11  // Minimum width for destination
+	distWidth := 8   // Minimum width for distance
+	nextHopWidth := 12 // Minimum width for next hop
+
+	for _, dest := range entries {
+		if len(dest) > destWidth {
+			destWidth = len(dest)
+		}
+		nextHop := dvr.Dvr.Entries[dest]
+		nextNodeStr := Interface{nextHop.NextNode}.ToString()
+		if len(nextNodeStr) > nextHopWidth {
+			nextHopWidth = len(nextNodeStr)
+		}
+	}
+
+	// Print table header with dynamic widths
+	header := fmt.Sprintf(
+		"%-*s | %-*s | %-*s",
+		destWidth, "Destination",
+		distWidth, "Distance",
+		nextHopWidth, "Next Hop",
+	)
+	logger.Info(header)
+	logger.Info(strings.Repeat("-", len(header)))
+
+	// Print the routing table rows
 	for _, dest := range entries {
 		nextHop := dvr.Dvr.Entries[dest]
-		logger.Info(fmt.Sprintf("%s | %d | %s", dest, nextHop.Distance, Interface{nextHop.NextNode}.ToString()))
+		row := fmt.Sprintf(
+			"%-*s | %-*d | %-*s",
+			destWidth, dest,
+			distWidth, nextHop.Distance,
+			nextHopWidth, Interface{nextHop.NextNode}.ToString(),
+		)
+		logger.Info(row)
 	}
+
+	logger.Info("\n---------------\n")
 }

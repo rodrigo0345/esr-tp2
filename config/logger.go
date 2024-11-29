@@ -8,6 +8,7 @@ import (
 type Logger struct {
 	level int
   nodeName string
+  lastMessage string
 }
 
 func NewLogger(level int, nodeName string) *Logger {
@@ -22,6 +23,11 @@ func (l *Logger) SetLevel(level int) {
 }
 
 func (l *Logger) Log(level int, message string) {
+
+  if message == l.lastMessage {
+    return
+  }
+
 	if level <= l.level {
 		// add colors depending on the level
 		switch level {
@@ -33,6 +39,8 @@ func (l *Logger) Log(level int, message string) {
 			fmt.Printf("\x1b[33m[%s - %s] %s\x1b[0m\n", time.Now().Format("15:04:05"), l.nodeName, message)
 		}
 	}
+
+  l.lastMessage = message
 }
 
 func (l *Logger) Info(message string) {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	bootstrapsystem "github.com/rodrigo0345/esr-tp2/client/bootstrapSystem"
+	keepalive "github.com/rodrigo0345/esr-tp2/client/keep-alive"
 	"github.com/rodrigo0345/esr-tp2/client/ui"
 	"github.com/rodrigo0345/esr-tp2/config"
 	cnf "github.com/rodrigo0345/esr-tp2/config"
@@ -58,12 +59,12 @@ func Client(cnf *cnf.AppConfigList) {
 	}()
 
 	// Wait until we receive the bestPop to start the UI
-	bestPop := <-createUIChan
-
-	// Start the UI on the main thread
-	ui.StartUI(bestPop.Addr, cnf, uiChannel)
-
-	// The application will continue running until the UI is closed
+	select {
+	case bestPop := <-createUIChan:
+    logger.Info(fmt.Sprintf("Best pop is %s", bestPop.Addr))
+    go keepalive.KeepAlive(cnf, bestPop.Addr, 4)
+		ui.StartUI(bestPop.Addr, cnf, uiChannel)
+	}
 }
 
 func handleMessage(data []byte, cnf *cnf.AppConfigList, bsSystem *bootstrapsystem.BootstrapSystem, logger *config.Logger, createUIChan chan<- *bootstrapsystem.Pop, uiChannel chan<- *protobuf.Header) {
@@ -185,4 +186,3 @@ func ProcessBestPop(cnf *cnf.AppConfigList, msg *protobuf.Header, bsSystem *boot
 		time.Sleep(time.Second * 3)
 	}
 }
-

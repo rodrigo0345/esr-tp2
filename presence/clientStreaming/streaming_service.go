@@ -150,6 +150,8 @@ func (ss *StreamingService) PrepareMessageForDeadClient(video Video, client UdpC
 }
 
 func (ss *StreamingService) MarkClientAsSeen(client UdpClient) {
+  ss.Lock()
+  defer ss.Unlock()
 	for _, c := range ss.UdpClients {
 		for _, cl := range c {
 			if cl.String() == client.String() {

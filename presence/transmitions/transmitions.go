@@ -25,9 +25,6 @@ func NewTransmissionService(logger *config.Logger, config *config.AppConfigList)
 
 func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.DistanceVectorRouting, isUdp bool) bool {
 
-  if isUdp {
-    ts.Logger.Debug("Using UDP")
-  }
 	messages := SplitTargets(packet.Target, rt, packet)
 
 	if len(messages) == 0 {
@@ -91,7 +88,6 @@ func sendDataUDP(data []byte, clientIp string) {
 
   // update the port
   clientIp = fmt.Sprintf("%s:%d", ip, portInt - 1)
-  fmt.Println(fmt.Sprintf("Sending UDP packet to %s", clientIp))
 
   config.SendMessageUDP(clientIp, data)
 }

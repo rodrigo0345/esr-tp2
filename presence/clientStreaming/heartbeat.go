@@ -9,6 +9,7 @@ import (
 // this is directly called by the client
 func (ss *StreamingService) ClientHeartbeat(video Video, udpClient *protobuf.Interface, callback Callback) {
 
+  ss.Logger.Debug("Received Heartbeat from " + udpClient.String())
   client := UdpClient{Interface: udpClient, LastSeen: time.Now()}
   ss.MarkClientAsSeen(client)
 
@@ -16,4 +17,5 @@ func (ss *StreamingService) ClientHeartbeat(video Video, udpClient *protobuf.Int
     Header: nil,
     Cancel: false,
   }
+  return
 }

@@ -32,7 +32,7 @@ func NewPresenceSystem(cnf *config.AppConfigList) *PresenceSystem {
 	logger := config.NewLogger(2, cnf.NodeName)
 
 	streamingService := clientStreaming.NewStreamingService(cnf, logger)
-	streamingService.RunBackgroundRoutine(120)
+	streamingService.RunBackgroundRoutine(10)
 
 	transmissionService := transmitions.NewTransmissionService(logger, cnf)
 
@@ -185,7 +185,6 @@ func (ps *PresenceSystem) handleUDPMessage(data []byte) {
 	header.Hops += 1
 
 	isVideoPacket := header.GetServerVideoChunk() != nil
-	ps.Logger.Info(fmt.Sprintf("Received video chunk from %s", header.GetSender()))
 	if !isVideoPacket {
 		// Retransmit the packet to neighbors
 		ps.TransmitionService.SendPacket(header, ps.RoutingTable, true)
@@ -249,7 +248,7 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 			switch header.Type {
 			case protobuf.RequestType_CLIENT_PING:
 
-        ps.Logger.Debug(fmt.Sprintf("Received PING from %s", remoteIp))
+				ps.Logger.Debug(fmt.Sprintf("Received PING from %s", remoteIp))
 				var callback chan clientStreaming.CallbackData = make(chan clientStreaming.CallbackData)
 
 				ps.ClientService.Signal <- clientStreaming.SignalData{
@@ -265,6 +264,8 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 						ps.Logger.Info("Client ping error")
 						return
 					}
+
+					ps.Logger.Debug("Reply sent\n")
 				}
 
 				break
@@ -315,19 +316,22 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 
 			case protobuf.RequestType_HEARTBEAT:
 
-				ps.ClientService.SendSignal(clientStreaming.SignalData{
+        callback := make(chan clientStreaming.CallbackData)
+				ps.ClientService.Signal <- clientStreaming.SignalData{
 					Command:   clientStreaming.HEARTBEAT,
 					Video:     clientStreaming.Video(videoName),
 					UdpClient: config.ToInterface(remoteIp),
-					Callback:  nil,
-				})
-
-				select {
-				case data := <-ps.ClientService.SignalDead:
-					// isto não faz nada
-					ps.Logger.Info(fmt.Sprintf("Client %s is not pinging\n", data.Header.GetSender()))
-				default:
+					Callback:  callback,
 				}
+
+        select {
+        case data := <-callback:
+          if data.Cancel {
+            ps.Logger.Info("Client heartbeat error")
+            return
+          }
+        }
+      
 
 			default:
 				ps.Logger.Error(fmt.Sprintf("Received unrecognized packet type from %v\n", addr))
