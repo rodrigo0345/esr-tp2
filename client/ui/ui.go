@@ -21,19 +21,20 @@ import (
 )
 
 type Statistics struct {
-	mu                sync.Mutex
-	startTime         time.Time
-	dataPoints        []statDataPoint // Rolling window of stats
+	mu                 sync.Mutex
+	startTime          time.Time
+	dataPoints         []statDataPoint // Rolling window of stats
 	totalBytesReceived int64
 	totalSent          int
+	pathLabel          string
 }
 
 type statDataPoint struct {
-	timestamp       time.Time
-	packetSize      int
-	sequenceNumber  int
-	receivedTime    int64
-	sendTimestamp   int64
+	timestamp      time.Time
+	packetSize     int
+	sequenceNumber int
+	receivedTime   int64
+	sendTimestamp  int64
 }
 
 // Maximum time window for metrics
@@ -48,7 +49,7 @@ func (s *Statistics) Reset() {
 	s.totalSent = 0
 }
 
-func (s *Statistics) AddDataPoint(receivedTime int64, sendTimestamp int64, sequenceNumber int, packetSize int) {
+func (s *Statistics) AddDataPoint(receivedTime int64, sendTimestamp int64, sequenceNumber int, packetSize int, path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -61,6 +62,7 @@ func (s *Statistics) AddDataPoint(receivedTime int64, sendTimestamp int64, seque
 		receivedTime:   receivedTime,
 		sendTimestamp:  sendTimestamp,
 	})
+  s.pathLabel = path
 	s.totalBytesReceived += int64(packetSize)
 	s.totalSent = sequenceNumber
 
@@ -135,26 +137,26 @@ func (s *Statistics) CalculateMetrics() (float64, int, float64, float64, float64
 }
 
 type UI struct {
-	imgCanvas    *canvas.Image
-	pathLabel    *widget.Label
-	messageEntry *widget.Entry
-	targetEntry  *widget.Entry
-	sendButton   *widget.Button
-	cancelButton *widget.Button
-	statsButton  *widget.Button
-	stats        *Statistics
+	imgCanvas     *canvas.Image
+	pathLabel     *widget.Label
+	videoDropdown *widget.Select
+	targetEntry   *widget.Entry
+	sendButton    *widget.Button
+	cancelButton  *widget.Button
+	statsButton   *widget.Button
+	stats         *Statistics
 }
 
 func NewUI() *UI {
 	return &UI{
-		imgCanvas:    canvas.NewImageFromImage(nil),
-		pathLabel:    widget.NewLabel(""),
-		messageEntry: widget.NewEntry(),
-		targetEntry:  widget.NewEntry(),
-		sendButton:   widget.NewButton("Send", nil),
-		cancelButton: widget.NewButton("Stop", nil),
-		statsButton:  widget.NewButton("Statistics", nil),
-		stats:        &Statistics{startTime: time.Now()},
+		imgCanvas:     canvas.NewImageFromImage(nil),
+		pathLabel:     widget.NewLabel(""),
+		videoDropdown: widget.NewSelect([]string{"film", "demo"}, nil), // Dropdown menu
+		targetEntry:   widget.NewEntry(),
+		sendButton:    widget.NewButton("Send", nil),
+		cancelButton:  widget.NewButton("Stop", nil),
+		statsButton:   widget.NewButton("Statistics", nil),
+		stats:         &Statistics{startTime: time.Now()},
 	}
 }
 
@@ -179,6 +181,7 @@ func (ui *UI) ShowStatsWindow(app fyne.App) {
 	packetLossLabel := widget.NewLabel("Packet Loss: 0.00%")
 	fpsLabel := widget.NewLabel("FPS: 0.00")
 	throughputLabel := widget.NewLabel("Throughput: 0.00 kbps")
+  pathLabel := widget.NewLabel("Path: ")
 
 	statsContent := container.NewVBox(
 		elapsedTimeLabel,
@@ -187,6 +190,7 @@ func (ui *UI) ShowStatsWindow(app fyne.App) {
 		packetLossLabel,
 		fpsLabel,
 		throughputLabel,
+    pathLabel,
 	)
 	statsWindow.SetContent(statsContent)
 
@@ -206,6 +210,7 @@ func (ui *UI) ShowStatsWindow(app fyne.App) {
 				packetLossLabel.SetText(fmt.Sprintf("Packet Loss: %.2f%%", packetLoss))
 				fpsLabel.SetText(fmt.Sprintf("FPS: %.2f", fps))
 				throughputLabel.SetText(fmt.Sprintf("Throughput: %.2f kbps", throughput))
+        pathLabel.SetText(fmt.Sprintf("Path: %s", ui.stats.pathLabel))
 				time.Sleep(500 * time.Millisecond)
 			}
 		}
@@ -224,15 +229,19 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 	myWindow.Resize(fyne.NewSize(maxWidth, 600))
 	myWindow.SetFixedSize(true) // Prevent resizing beyond the set width and height
 
-	ui.messageEntry.SetPlaceHolder("Enter video")
+	ui.videoDropdown.PlaceHolder = "Select video" // Placeholder text for dropdown
 	ui.targetEntry.SetPlaceHolder("Enter target")
 
 	// Button actions
 	ui.sendButton.OnTapped = func() {
-		sendCommand("PLAY", ui.messageEntry.Text, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
+		if ui.videoDropdown.Selected == "" {
+			log.Println("Please select a video before sending.")
+			return
+		}
+		sendCommand("PLAY", ui.videoDropdown.Selected, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
 	}
 	ui.cancelButton.OnTapped = func() {
-		sendCommand("STOP", ui.messageEntry.Text, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
+		sendCommand("STOP", ui.videoDropdown.Selected, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
 	}
 	ui.statsButton.OnTapped = func() {
 		ui.ShowStatsWindow(myApp)
@@ -242,7 +251,7 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 	buttons := container.NewHBox(ui.sendButton, ui.cancelButton, ui.statsButton)
 
 	// Place other controls in a vertical container
-	controls := container.NewVBox(ui.messageEntry, ui.targetEntry, buttons, ui.pathLabel)
+	controls := container.NewVBox(ui.videoDropdown, ui.targetEntry, buttons, ui.pathLabel)
 
 	// Combine the controls with the image canvas
 	content := container.NewBorder(nil, controls, nil, nil, ui.imgCanvas)
@@ -252,9 +261,6 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 	// Goroutine to process messages from uiChannel
 	go func() {
 		for msg := range uiChannel {
-			if len(msg.Path) > 0 {
-				ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path))
-			}
 
 			if videoChunk := msg.GetServerVideoChunk(); videoChunk != nil {
 				ui.UpdateImage(videoChunk.Data)
@@ -263,6 +269,7 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 					videoChunk.Timestamp,
 					int(videoChunk.SequenceNumber),
 					len(videoChunk.Data),
+          msg.Path,
 				)
 			}
 		}

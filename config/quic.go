@@ -7,8 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
 
 	"github.com/quic-go/quic-go"
+)
+
+const (
+	defaultTimeout = 5 * time.Second // Default timeout for sending/receiving messages
 )
 
 // StartConnStream initializes a QUIC connection and opens a stream
@@ -75,46 +80,81 @@ func IsConnectionOpen(conn quic.Connection) bool {
 }
 
 func IsStreamOpen(stream quic.Stream) bool {
-  if stream == nil {
-    return false
-  }
-  return stream.Context().Err() == nil
+	if stream == nil {
+		return false
+	}
+	return stream.Context().Err() == nil
 }
 
-// SendMessage sends a message to the stream with length-prefix encoding
+// SendMessage sends a message to the stream with length-prefix encoding and a timeout
 func SendMessage(stream quic.Stream, message []byte) error {
 	if stream == nil {
 		return fmt.Errorf("sending data to a nil stream")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
 	// Send the length of the message first
 	lengthPrefix := make([]byte, 4)
 	binary.BigEndian.PutUint32(lengthPrefix, uint32(len(message)))
 
-	// Write length prefix
-	if _, err := stream.Write(lengthPrefix); err != nil {
-		return fmt.Errorf("failed to send message length: %w", err)
+	// Write length prefix with timeout
+	done := make(chan error, 1)
+	go func() {
+		_, err := stream.Write(lengthPrefix)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("failed to send message length: %w", err)
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("send message length timed out: %w", ctx.Err())
 	}
 
-	// Write the actual message
-	if _, err := stream.Write(message); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
+	// Write the actual message with timeout
+	go func() {
+		_, err := stream.Write(message)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("failed to send message: %w", err)
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("send message timed out: %w", ctx.Err())
 	}
 
 	return nil
 }
 
-// ReceiveMessage reads a message from the stream with length-prefix decoding
+// ReceiveMessage reads a message from the stream with length-prefix decoding and a timeout
 func ReceiveMessage(stream quic.Stream) ([]byte, error) {
 	if stream == nil {
 		return nil, fmt.Errorf("receive message from nil stream")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
 	lengthBuf := make([]byte, 4)
 
-	// Read the length of the message
-	if _, err := io.ReadFull(stream, lengthBuf); err != nil {
-		return nil, fmt.Errorf("failed to read message length: %w", err)
+	// Read the length of the message with timeout
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(stream, lengthBuf)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return nil, fmt.Errorf("failed to read message length: %w", err)
+		}
+	case <-ctx.Done():
+		return nil, fmt.Errorf("read message length timed out: %w", ctx.Err())
 	}
 
 	messageLength := binary.BigEndian.Uint32(lengthBuf)
@@ -124,9 +164,18 @@ func ReceiveMessage(stream quic.Stream) ([]byte, error) {
 
 	buf := make([]byte, messageLength)
 
-	// Read the actual message
-	if _, err := io.ReadFull(stream, buf); err != nil {
-		return nil, fmt.Errorf("failed to read message: %w", err)
+	// Read the actual message with timeout
+	go func() {
+		_, err := io.ReadFull(stream, buf)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return nil, fmt.Errorf("failed to read message: %w", err)
+		}
+	case <-ctx.Done():
+		return nil, fmt.Errorf("read message timed out: %w", ctx.Err())
 	}
 
 	return buf, nil

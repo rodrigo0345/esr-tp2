@@ -68,31 +68,31 @@ func (ss *ServerSystem) BsClients() {
 	ss.Logger.Info(fmt.Sprintf("Listening for UDP retransmit on %s", addrString))
 
 	for {
-    data, remoteAddr, err := config.ReceiveMessageUDP(conn)
+		data, remoteAddr, err := config.ReceiveMessageUDP(conn)
 		if err != nil {
 			ss.Logger.Error(fmt.Sprintf("Error reading from UDP: %v", err))
 			continue // Consider breaking the loop or implementing a retry mechanism based on the error
 		}
 
-    remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP, 2222)
+		remoteIp := fmt.Sprintf("%s:%d", remoteAddr.IP, 2222)
 
-    go func(data []byte, remoteAddr string){
+		go func(data []byte, remoteAddr string) {
 
-      header := &protobuf.Header{}
-      err = proto.Unmarshal(data, header)
+			header := &protobuf.Header{}
+			err = proto.Unmarshal(data, header)
 
-      if err != nil {
-        ss.Logger.Error(fmt.Sprintf("Error unmarshalling UDP message: %v", err))
-        return
-      }
+			if err != nil {
+				ss.Logger.Error(fmt.Sprintf("Error unmarshalling UDP message: %v", err))
+				return
+			}
 
-      switch header.Type {
-      case protobuf.RequestType_CLIENT_PING:
-        ss.Bootstrapper.BootstrapClients(header, remoteIp)
-        break
-      default:
-    }
-    } (data, remoteIp)
+			switch header.Type {
+			case protobuf.RequestType_CLIENT_PING:
+				ss.Bootstrapper.BootstrapClients(header, remoteIp)
+				break
+			default:
+			}
+		}(data, remoteIp)
 
 	}
 }
@@ -244,7 +244,6 @@ func (ss *ServerSystem) BackgroundStreaming() {
 	}
 }
 
-
 func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 	pwd := os.Getenv("PWD")
 	videoFilePath := fmt.Sprintf("%s/videos/%s", pwd, video.Video)
@@ -336,16 +335,16 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 
 				// Populate the ServerVideoChunk with dynamic metrics
 				serverVideoChunk := &protobuf.ServerVideoChunk{
-					SequenceNumber:       int32(sqNumber),
-					Timestamp:            time.Now().UnixMilli(),
-					Format:               protobuf.VideoFormat_MJPEG,
-					Data:                 frameData,
-					IsLastChunk:          false,
-					BitrateKbps:          currentMetrics.BitrateKbps,
-					Width:                int32(currentMetrics.Width),
-					Height:               int32(currentMetrics.Height),
-					Fps:                  currentMetrics.Fps,
-					LatencyMs:            currentMetrics.LatencyMs,
+					SequenceNumber:      int32(sqNumber),
+					Timestamp:           time.Now().UnixMilli(),
+					Format:              protobuf.VideoFormat_MJPEG,
+					Data:                frameData,
+					IsLastChunk:         false,
+					BitrateKbps:         currentMetrics.BitrateKbps,
+					Width:               int32(currentMetrics.Width),
+					Height:              int32(currentMetrics.Height),
+					Fps:                 currentMetrics.Fps,
+					LatencyMs:           currentMetrics.LatencyMs,
 					CurrentBitrateKbps:  currentMetrics.CurrentBitrateKbps,
 					PreviousBitrateKbps: currentMetrics.PreviousBitrateKbps,
 				}
@@ -357,6 +356,8 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					Path:           ss.PresenceSystem.Config.NodeName,
 					Type:           protobuf.RequestType_RETRANSMIT,
 					Length:         int32(len(frameData)),
+					MaxHops:        10,
+					Hops:           1,
 					Timestamp:      time.Now().UnixMilli(),
 					Content: &protobuf.Header_ServerVideoChunk{
 						ServerVideoChunk: serverVideoChunk,
@@ -369,8 +370,7 @@ func (ss *ServerSystem) streamVideo(video *Stream, stopChan chan struct{}) {
 					ss.Logger.Error(fmt.Sprintf("Failed to send video chunk to %s", header.GetSender()))
 				}
 
-				// Sleep to control frame rate (e.g., 30 FPS)
-				time.Sleep(time.Millisecond * 25)
+				time.Sleep(time.Millisecond * 33)
 			}
 		}
 
@@ -425,7 +425,7 @@ func collectMetrics(reader *bufio.Reader, metricsChan chan<- ServerMetrics) {
 			latencyMs := calculateLatency()
 
 			metrics := ServerMetrics{
-				BitrateKbps:        int32(bitrate),
+				BitrateKbps:         int32(bitrate),
 				Fps:                 fps,
 				LatencyMs:           latencyMs,
 				CurrentBitrateKbps:  int32(bitrate),

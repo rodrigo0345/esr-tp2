@@ -185,6 +185,11 @@ func (ps *PresenceSystem) handleUDPMessage(data []byte) {
 	header.Path = header.Path + " " + ps.Config.NodeName
 	header.Hops += 1
 
+  if header.GetMaxHops() > 0 && header.Hops >= header.GetMaxHops() {
+    ps.Logger.Debug("Reached max hops")
+    return
+  }
+
 	isVideoPacket := header.GetServerVideoChunk() != nil
 	if !isVideoPacket {
 		// Retransmit the packet to neighbors
