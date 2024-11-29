@@ -58,7 +58,7 @@ func Client(cnf *cnf.AppConfigList) {
 	select {
 	case bestPop := <-createUIChan:
     logger.Info(fmt.Sprintf("Best pop is %s", bestPop.Addr))
-    go keepalive.KeepAlive(cnf, bestPop.Addr, 2)
+    go keepalive.KeepAlive(cnf, bestPop.Addr, 4)
 		ui.StartUI(bestPop.Addr, cnf, uiChannel)
 	}
 }

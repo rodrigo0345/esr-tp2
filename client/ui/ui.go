@@ -21,53 +21,117 @@ import (
 )
 
 type Statistics struct {
-	prevDelay   float64
-	jitterSum   float64
-	packetCount int
-	totalSent   int
-	startTime   time.Time
-	mu          sync.Mutex
+	mu                sync.Mutex
+	startTime         time.Time
+	dataPoints        []statDataPoint // Rolling window of stats
+	totalBytesReceived int64
+	totalSent          int
 }
 
-func (s *Statistics) UpdateStats(receivedTime int64, sendTimestamp int64, sequenceNumber int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	currentDelay := float64(receivedTime - sendTimestamp)
-	if s.packetCount > 0 {
-		jitter := math.Abs(currentDelay - s.prevDelay)
-		s.jitterSum += jitter
-	}
-	s.prevDelay = currentDelay
-	s.packetCount++
-	s.totalSent = sequenceNumber
+type statDataPoint struct {
+	timestamp       time.Time
+	packetSize      int
+	sequenceNumber  int
+	receivedTime    int64
+	sendTimestamp   int64
 }
+
+// Maximum time window for metrics
+const rollingWindowSize = 5 * time.Second
 
 func (s *Statistics) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prevDelay = 0
-	s.jitterSum = 0
-	s.packetCount = 0
-	s.totalSent = 0
 	s.startTime = time.Now()
+	s.dataPoints = nil
+	s.totalBytesReceived = 0
+	s.totalSent = 0
 }
 
-func (s *Statistics) CalculateMetrics() (float64, int, float64, float64) {
+func (s *Statistics) AddDataPoint(receivedTime int64, sendTimestamp int64, sequenceNumber int, packetSize int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	elapsedTime := time.Since(s.startTime).Seconds()
-	avgJitter := 0.0
-	if s.packetCount > 1 {
-		avgJitter = s.jitterSum / float64(s.packetCount-1)
+	// Add new data point
+	now := time.Now()
+	s.dataPoints = append(s.dataPoints, statDataPoint{
+		timestamp:      now,
+		packetSize:     packetSize,
+		sequenceNumber: sequenceNumber,
+		receivedTime:   receivedTime,
+		sendTimestamp:  sendTimestamp,
+	})
+	s.totalBytesReceived += int64(packetSize)
+	s.totalSent = sequenceNumber
+
+	// Remove old data points beyond the rolling window
+	cutoff := now.Add(-rollingWindowSize)
+	for len(s.dataPoints) > 0 && s.dataPoints[0].timestamp.Before(cutoff) {
+		s.dataPoints = s.dataPoints[1:]
 	}
+}
+
+func (s *Statistics) CalculateMetrics() (float64, int, float64, float64, float64, float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Calculate metrics only for the last 5 seconds
+	now := time.Now()
+	cutoff := now.Add(-rollingWindowSize)
+	validDataPoints := 0
+	jitterSum := 0.0
+	prevDelay := 0.0
+	totalBytes := 0
+	firstSequence := -1
+	lastSequence := -1
+
+	for _, point := range s.dataPoints {
+		if point.timestamp.Before(cutoff) {
+			continue
+		}
+		validDataPoints++
+		totalBytes += point.packetSize
+
+		// Track sequence numbers
+		if firstSequence == -1 || point.sequenceNumber < firstSequence {
+			firstSequence = point.sequenceNumber
+		}
+		if lastSequence == -1 || point.sequenceNumber > lastSequence {
+			lastSequence = point.sequenceNumber
+		}
+
+		// Delay and jitter
+		currentDelay := float64(point.receivedTime - point.sendTimestamp)
+		if lastSequence >= 0 {
+			jitter := math.Abs(currentDelay - prevDelay)
+			jitterSum += jitter
+		}
+		prevDelay = currentDelay
+	}
+
+	// Calculate packet loss
+	totalPackets := lastSequence - firstSequence + 1
 	packetLoss := 0.0
-	if s.totalSent > 0 {
-		lossCount := s.totalSent - s.packetCount
-		packetLoss = float64(lossCount) / float64(s.totalSent) * 100
+	if totalPackets > 0 {
+		packetLoss = float64(totalPackets-validDataPoints) / float64(totalPackets) * 100
 	}
-	return elapsedTime, s.packetCount, avgJitter, packetLoss
+
+	// Calculate throughput in kilobits per second
+	throughput := float64(totalBytes) * 8 / rollingWindowSize.Seconds() / 1024.0 // Convert to kbps
+
+	// Calculate FPS
+	fps := float64(validDataPoints) / rollingWindowSize.Seconds()
+
+	// Average jitter
+	avgJitter := 0.0
+	if validDataPoints > 1 {
+		avgJitter = jitterSum / float64(validDataPoints-1)
+	}
+
+	// Elapsed time
+	elapsedTime := time.Since(s.startTime).Seconds()
+
+	return elapsedTime, validDataPoints, avgJitter, packetLoss, fps, throughput
 }
 
 type UI struct {
@@ -109,16 +173,20 @@ func (ui *UI) ShowStatsWindow(app fyne.App) {
 	statsWindow := app.NewWindow("Statistics")
 	statsWindow.Resize(fyne.NewSize(400, 300))
 
-	elapsedTimeLabel := widget.NewLabel("")
-	packetCountLabel := widget.NewLabel("")
-	avgJitterLabel := widget.NewLabel("")
-	packetLossRate := widget.NewLabel("")
+	elapsedTimeLabel := widget.NewLabel("Elapsed Time: 0.00 s")
+	packetCountLabel := widget.NewLabel("Packets Received: 0")
+	avgJitterLabel := widget.NewLabel("Average Jitter: 0.00 ms")
+	packetLossLabel := widget.NewLabel("Packet Loss: 0.00%")
+	fpsLabel := widget.NewLabel("FPS: 0.00")
+	throughputLabel := widget.NewLabel("Throughput: 0.00 kbps")
 
 	statsContent := container.NewVBox(
 		elapsedTimeLabel,
 		packetCountLabel,
 		avgJitterLabel,
-		packetLossRate,
+		packetLossLabel,
+		fpsLabel,
+		throughputLabel,
 	)
 	statsWindow.SetContent(statsContent)
 
@@ -131,15 +199,18 @@ func (ui *UI) ShowStatsWindow(app fyne.App) {
 			case <-done:
 				return
 			default:
-				elapsedTime, packetCount, avgJitter, packetLoss := ui.stats.CalculateMetrics()
-				elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f seconds", elapsedTime))
+				elapsedTime, packetCount, avgJitter, packetLoss, fps, throughput := ui.stats.CalculateMetrics()
+				elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f s", elapsedTime))
 				packetCountLabel.SetText(fmt.Sprintf("Packets Received: %d", packetCount))
 				avgJitterLabel.SetText(fmt.Sprintf("Average Jitter: %.2f ms", avgJitter))
-				packetLossRate.SetText(fmt.Sprintf("Packet Loss: %.2f%%", packetLoss))
+				packetLossLabel.SetText(fmt.Sprintf("Packet Loss: %.2f%%", packetLoss))
+				fpsLabel.SetText(fmt.Sprintf("FPS: %.2f", fps))
+				throughputLabel.SetText(fmt.Sprintf("Throughput: %.2f kbps", throughput))
 				time.Sleep(500 * time.Millisecond)
 			}
 		}
 	}()
+
 	statsWindow.Show()
 }
 
@@ -181,15 +252,18 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 	// Goroutine to process messages from uiChannel
 	go func() {
 		for msg := range uiChannel {
-      if len(msg.Path) > 0 {
-        ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path))
-      } else if len(msg.RequestedVideo) > 8 {
-        ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path[0:8]))
-      }
+			if len(msg.Path) > 0 {
+				ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path))
+			}
 
 			if videoChunk := msg.GetServerVideoChunk(); videoChunk != nil {
 				ui.UpdateImage(videoChunk.Data)
-				ui.stats.UpdateStats(time.Now().UnixMilli(), videoChunk.Timestamp, int(videoChunk.SequenceNumber))
+				ui.stats.AddDataPoint(
+					time.Now().UnixMilli(),
+					videoChunk.Timestamp,
+					int(videoChunk.SequenceNumber),
+					len(videoChunk.Data),
+				)
 			}
 		}
 	}()
