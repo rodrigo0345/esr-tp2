@@ -148,8 +148,15 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 	myApp := app.New()
 	myWindow := myApp.NewWindow("Streaming Client")
 
+	// Set window width constraints
+	const maxWidth = 600
+	myWindow.Resize(fyne.NewSize(maxWidth, 600))
+	myWindow.SetFixedSize(true) // Prevent resizing beyond the set width and height
+
 	ui.messageEntry.SetPlaceHolder("Enter video")
 	ui.targetEntry.SetPlaceHolder("Enter target")
+
+	// Button actions
 	ui.sendButton.OnTapped = func() {
 		sendCommand("PLAY", ui.messageEntry.Text, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
 	}
@@ -160,16 +167,26 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 		ui.ShowStatsWindow(myApp)
 	}
 
-	controls := container.NewVBox(ui.messageEntry, ui.targetEntry, ui.sendButton, ui.cancelButton, ui.statsButton, ui.pathLabel)
+	// Arrange buttons horizontally
+	buttons := container.NewHBox(ui.sendButton, ui.cancelButton, ui.statsButton)
+
+	// Place other controls in a vertical container
+	controls := container.NewVBox(ui.messageEntry, ui.targetEntry, buttons, ui.pathLabel)
+
+	// Combine the controls with the image canvas
 	content := container.NewBorder(nil, controls, nil, nil, ui.imgCanvas)
 
 	myWindow.SetContent(content)
-	myWindow.Resize(fyne.NewSize(800, 600))
 
-	// Start a goroutine to process messages from uiChannel
+	// Goroutine to process messages from uiChannel
 	go func() {
 		for msg := range uiChannel {
-			ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path))
+      if len(msg.Path) > 0 {
+        ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path))
+      } else if len(msg.RequestedVideo) > 8 {
+        ui.pathLabel.SetText(fmt.Sprintf("Path: %s", msg.Path[0:8]))
+      }
+
 			if videoChunk := msg.GetServerVideoChunk(); videoChunk != nil {
 				ui.UpdateImage(videoChunk.Data)
 				ui.stats.UpdateStats(time.Now().UnixMilli(), videoChunk.Timestamp, int(videoChunk.SequenceNumber))
@@ -206,4 +223,3 @@ func sendCommand(command, video, target string, bestPopAddr string, cnf *cnf.App
 	}
 	config.SendMessageUDP(bestPopAddr, data)
 }
-

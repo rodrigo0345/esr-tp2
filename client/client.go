@@ -28,7 +28,7 @@ func Client(cnf *cnf.AppConfigList) {
 
 	laddr := net.UDPAddr{
 		Port: 2222,
-		IP:   net.IPv4zero, // Listen on all interfaces
+		IP:   net.IPv4zero, 
 	}
 	listener, err := net.ListenUDP("udp", &laddr)
 	if err != nil {
@@ -36,16 +36,12 @@ func Client(cnf *cnf.AppConfigList) {
 	}
 	defer listener.Close()
 
-	// Channel to signal when to create the UI
 	createUIChan := make(chan *bootstrapsystem.Pop)
 
-	// Channel for UI updates (buffered to prevent blocking)
 	uiChannel := make(chan *protobuf.Header, 100)
 
-	// Start requesting neighbors
 	go RequestNeighbors(cnf, bsAddr, bsSystem)
 
-	// Start the main listener loop
 	go func() {
 		for {
 			data, _, err := config.ReceiveMessageUDP(listener)
@@ -176,7 +172,6 @@ func ProcessBestPop(cnf *cnf.AppConfigList, msg *protobuf.Header, bsSystem *boot
 		select {
 		case data := <-callback:
 			if data.Success {
-				// Process success if needed
 			}
 		}
 
