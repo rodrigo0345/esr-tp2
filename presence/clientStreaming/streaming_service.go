@@ -1,6 +1,7 @@
 package clientStreaming
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -44,7 +45,7 @@ const (
 
 type StreamingService struct {
 	sync.Mutex
-	UdpClients      map[Video][]UdpClient
+	UdpClients      map[Video][]*UdpClient
 	InterestedNodes map[Video][]Node
 	Logger          *config.Logger
 	Config          *config.AppConfigList
@@ -78,7 +79,7 @@ func (ss *StreamingService) RunBackgroundRoutine(seconds time.Duration) {
 	go func() {
 		for {
 			ss.CheckInactiveClients(seconds)
-			time.Sleep(time.Second * seconds)
+			time.Sleep(time.Second * 15)
 		}
 	}()
 }
@@ -97,7 +98,7 @@ func (ss *StreamingService) Unlock() {
 
 func NewStreamingService(cnf *config.AppConfigList, logger *config.Logger) *StreamingService {
 	return &StreamingService{
-		UdpClients:      make(map[Video][]UdpClient),
+		UdpClients:      make(map[Video][]*UdpClient),
 		InterestedNodes: make(map[Video][]Node),
 		Logger:          logger,
 		Config:          cnf,
@@ -106,21 +107,22 @@ func NewStreamingService(cnf *config.AppConfigList, logger *config.Logger) *Stre
 	}
 }
 
-func (ss *StreamingService) AddUdpClient(video Video, client UdpClient) {
-	ss.Lock()
-	defer ss.Unlock()
+func (ss *StreamingService) AddUdpClient(video Video, client *UdpClient) {
 	ss.UdpClients[video] = append(ss.UdpClients[video], client)
 }
 
 func (ss *StreamingService) CheckInactiveClients(seconds time.Duration) {
+
 	for video, clients := range ss.UdpClients {
 		for _, client := range clients {
-			if time.Since(client.LastSeen) > time.Second*seconds {
-				ss.RemoveUdpClient(video, client)
+			if time.Since(client.LastSeen) > seconds*time.Second {
+
+				ss.Logger.Error(fmt.Sprintf("Last seen %s:%d in %s since %d seconds", client.Ip, client.Port, video, seconds))
+				ss.RemoveUdpClient(video, *client)
 
 				// notifies the network
 				ss.SignalDead <- CallbackData{
-					Header: ss.PrepareMessageForDeadClient(video, client),
+					Header: ss.PrepareMessageForDeadClient(video, *client),
 					Cancel: false,
 				}
 			}
@@ -150,11 +152,16 @@ func (ss *StreamingService) PrepareMessageForDeadClient(video Video, client UdpC
 }
 
 func (ss *StreamingService) MarkClientAsSeen(client UdpClient) {
-  ss.Lock()
-  defer ss.Unlock()
-	for _, c := range ss.UdpClients {
-		for _, cl := range c {
-			if cl.String() == client.String() {
+	ss.Lock()
+	defer ss.Unlock()
+
+	for _, clients := range ss.UdpClients {
+		for _, cl := range clients {
+
+			clString := fmt.Sprintf("%s:%d", cl.Ip, cl.Port)
+			clientString := fmt.Sprintf("%s:%d", client.Ip, client.Port)
+
+			if clString == clientString {
 				cl.LastSeen = time.Now()
 			}
 		}
@@ -164,6 +171,7 @@ func (ss *StreamingService) MarkClientAsSeen(client UdpClient) {
 func (ss *StreamingService) RemoveUdpClient(video Video, client UdpClient) {
 	ss.Lock()
 	defer ss.Unlock()
+
 	for i, c := range ss.UdpClients[video] {
 		if c.String() == client.String() {
 			ss.UdpClients[video] = append(ss.UdpClients[video][:i], ss.UdpClients[video][i+1:]...)

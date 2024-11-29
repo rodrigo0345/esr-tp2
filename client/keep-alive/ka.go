@@ -9,22 +9,23 @@ import (
 )
 
 func KeepAlive(cnf *config.AppConfigList, bestPopAddr string, timeout time.Duration) {
-  for {
-    header := &protobuf.Header{
-      Type:           protobuf.RequestType_HEARTBEAT,
-      Length:         0,
-      Timestamp:      int64(time.Now().Unix()),
-      Sender:         cnf.NodeIP.Ip,
-      Target:         []string{bestPopAddr},
-    }
+	for {
+		header := &protobuf.Header{
+			Type:       protobuf.RequestType_HEARTBEAT,
+			Length:     0,
+			Timestamp:  int64(time.Now().Unix()),
+			Sender:     cnf.NodeIP.Ip,
+			Target:     []string{bestPopAddr},
+			ClientPort: "2222", // the port where this listens
+		}
 
-    data, err := proto.Marshal(header)
+		data, err := proto.Marshal(header)
 
-    if err != nil {
-      continue
-    }
+		if err != nil {
+			continue
+		}
 
-    config.SendMessageUDP(bestPopAddr, data)
-    time.Sleep(timeout * time.Second)
-  }
+		config.SendMessageUDP(bestPopAddr, data)
+		time.Sleep(timeout * time.Second)
+	}
 }

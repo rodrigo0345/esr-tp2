@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -315,6 +316,13 @@ func (ps *PresenceSystem) ListenForClientsInUDP() {
 				}
 
 			case protobuf.RequestType_HEARTBEAT:
+
+        port := header.ClientPort
+
+        ip := strings.Split(remoteIp, ":")[0]
+        fmt.Println(ip, port)
+
+        remoteIp := fmt.Sprintf("%s:%s", ip, port)
 
         callback := make(chan clientStreaming.CallbackData)
 				ps.ClientService.Signal <- clientStreaming.SignalData{

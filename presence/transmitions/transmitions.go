@@ -25,6 +25,12 @@ func NewTransmissionService(logger *config.Logger, config *config.AppConfigList)
 
 func (ts *TransmissionService) SendPacket(packet *protobuf.Header, rt *dvr.DistanceVectorRouting, isUdp bool) bool {
 
+  if isUdp {
+    ts.Logger.Info("Sending packet using UDP")
+  } else {
+    ts.Logger.Info("Sending packet using QUIC")
+  }
+
 	messages := SplitTargets(packet.Target, rt, packet)
 
 	if len(messages) == 0 {

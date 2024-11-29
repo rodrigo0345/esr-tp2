@@ -12,7 +12,7 @@ func (ss *StreamingService) Play(video Video, udpClient *protobuf.Interface, cal
 
 	// Create a new stream for this video if it doesn't exist
 	if _, exists := ss.UdpClients[video]; !exists {
-		ss.UdpClients[video] = []UdpClient{}
+		ss.UdpClients[video] = []*UdpClient{}
 	}
 
 	// Verificar que o cliente ainda não está a receber o vídeo
@@ -33,7 +33,7 @@ func (ss *StreamingService) Play(video Video, udpClient *protobuf.Interface, cal
   client := UdpClient{Interface: udpClient, LastSeen: time.Now()}
 
 	// Add the client to the list of clients interested in this video
-	ss.AddUdpClient(video, client)
+	ss.AddUdpClient(video, &client)
 
   targets := make([]string, 1)
   targets[0] = "s1"
