@@ -208,7 +208,7 @@ import (
 				fpsLabel.SetText(fmt.Sprintf("FPS: %.2f", fps))
 				throughputLabel.SetText(fmt.Sprintf("Throughput: %.2f kbps", throughput))
         pathLabel.SetText(fmt.Sprintf("Path: %s", ui.stats.pathLabel))
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(1200 * time.Millisecond)
 			}
 		}
 	}()
