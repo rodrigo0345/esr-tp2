@@ -73,7 +73,7 @@ func Client(config *cnf.AppConfigList) {
 		fps                float64
 		lastFpsUpdate      time.Time = time.Now()
 		bufferMutex        sync.Mutex
-		frameBuffer        []*image.Image // Changed to slice of pointers
+		frameBuffer        []*image.Image
 	)
 
 	resetStats := func() {
@@ -87,16 +87,26 @@ func Client(config *cnf.AppConfigList) {
 		totalBytesReceived = 0
 		frameDisplayCount = 0
 		fps = 0
-		lastFpsUpdate = time.Now() // Reset FPS timer
-		startTime = time.Now()     // Reset start time for elapsed
+		lastFpsUpdate = time.Now()
+		startTime = time.Now()
 	}
+
+	// List of available videos
+	videoOptions := []string{"lol", "demo", "video1.mp4", "video2.mp4"}
 
 	// Entry widgets and buttons
 	messageEntry := widget.NewEntry()
 	messageEntry.SetPlaceHolder("Enter video, 'lol' or 'demo'")
 	targetEntry := widget.NewEntry()
 	targetEntry.SetPlaceHolder("Enter target, 's1'")
-	// Buttons with enhanced visual design
+
+	// Dropdown widget for video selection
+	videoSelect := widget.NewSelect(videoOptions, func(selected string) {
+		messageEntry.SetText(selected) // Automatically set the selected video in the messageEntry
+	})
+	videoSelect.PlaceHolder = "Select a video"
+
+	// Buttons
 	sendButton := widget.NewButtonWithIcon("Send", theme.ConfirmIcon(), func() {
 		sendCommand("PLAY", messageEntry.Text, targetEntry.Text, conn, config, listenIp, resetStats)
 	})
@@ -108,11 +118,12 @@ func Client(config *cnf.AppConfigList) {
 		showStatsWindow(myApp, startTime, &packetCount, &jittersum, &statsMutex, &totalSent, &totalBytesReceived, &fps)
 	})
 
-	controls := container.NewVBox(messageEntry, targetEntry, sendButton, cancelButton, statsButton, pathLabel)
+	// Layout
+	controls := container.NewVBox(videoSelect, messageEntry, targetEntry, sendButton, cancelButton, statsButton, pathLabel)
 	content := container.NewBorder(nil, controls, nil, nil, imgCanvas)
 
 	myWindow.SetContent(content)
-	myWindow.Resize(fyne.NewSize(800, 600)) // Adjusted size of the main window
+	myWindow.Resize(fyne.NewSize(800, 600))
 
 	// Goroutine for listening to incoming messages
 	go func() {
@@ -145,7 +156,6 @@ func Client(config *cnf.AppConfigList) {
 				continue
 			}
 
-			// Lock the buffer to safely append the new frame
 			bufferMutex.Lock()
 			frameBuffer = append(frameBuffer, &frame)
 			bufferMutex.Unlock()
@@ -162,7 +172,7 @@ func Client(config *cnf.AppConfigList) {
 			}
 			prevDelay = currentDelay
 			packetCount++
-			totalSent = int(msg.GetServerVideoChunk().GetSequenceNumber()) // Update totalSent with the sequence number
+			totalSent = int(msg.GetServerVideoChunk().GetSequenceNumber())
 			totalBytesReceived += int64(len(videoData))
 			statsMutex.Unlock()
 		}
@@ -186,12 +196,10 @@ func Client(config *cnf.AppConfigList) {
 					imgCanvas.Image = frame
 					imgCanvas.Refresh()
 
-					// Update FPS
 					statsMutex.Lock()
 					frameDisplayCount++
 					elapsed := time.Since(lastFpsUpdate).Seconds()
 					if elapsed >= 1.0 {
-						// Update FPS correctly
 						fps = float64(frameDisplayCount) / elapsed
 						frameDisplayCount = 0
 						lastFpsUpdate = time.Now()
@@ -209,7 +217,6 @@ func Client(config *cnf.AppConfigList) {
 
 // Helper function to send commands
 func sendCommand(command, video, target string, conn net.Conn, config *cnf.AppConfigList, listenIp string, resetStats func()) {
-	// Reset statistics before sending the command
 	resetStats()
 
 	message := protobuf.Header{
@@ -249,48 +256,26 @@ func showStatsWindow(app fyne.App, startTime time.Time, packetCount *int, jitter
 	packetCountLabel := widget.NewLabel(fmt.Sprintf("Packets Received: %d", *packetCount))
 	totalBytesLabel := widget.NewLabel(fmt.Sprintf("Total Bytes: %d", *totalBytesReceived))
 	avgJitterLabel := widget.NewLabel(fmt.Sprintf("Avg Jitter: %.2f ms", *jittersum/float64(*packetCount)))
-	packetLossRate := widget.NewLabel(fmt.Sprintf("Packet Loss: %.2f%%", 0.0))
 	fpsLabel := widget.NewLabel(fmt.Sprintf("FPS: %.2f", *fps))
-	throughputLabel := widget.NewLabel("Throughput: 0 KB/s")
 
-	// Add the labels to the window
-	statsWindow.SetContent(container.NewVBox(elapsedTimeLabel, packetCountLabel, totalBytesLabel, avgJitterLabel, packetLossRate, throughputLabel, fpsLabel))
+	statsWindow.SetContent(container.NewVBox(elapsedTimeLabel, packetCountLabel, totalBytesLabel, avgJitterLabel, fpsLabel))
 
-	// Variables for packet loss calculation
-	var lastPacketCount int
-	var lastTotalSent int
-	var packetLossRateLast5s float64
-
-	// Update statistics every second
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 
 		for range ticker.C {
 			statsMutex.Lock()
-
-			// Calculate packet loss rate over the last 5 seconds
-			if int(time.Since(startTime).Seconds())%5 == 0 {
-				packetLossRateLast5s = float64(*totalSent-lastTotalSent-*packetCount+lastPacketCount) / float64(*totalSent-lastTotalSent) * 100
-				packetLossRate.SetText(fmt.Sprintf("Packets Lost in Last 5 Seconds: %.2f%%", packetLossRateLast5s))
-			}
-
-			// Store the current values for the next 5-second interval calculation
-			lastPacketCount = *packetCount
-			lastTotalSent = *totalSent
-
-			// Calculate throughput in KB/s
-			throughput := float64(*totalBytesReceived-int64(lastTotalSent)) / 1024.0 // KB per second
-			throughputLabel.SetText(fmt.Sprintf("Throughput: %.2f KB/s", throughput))
-
-			// Update the labels with the current statistics
 			elapsed := time.Since(startTime).Seconds()
 			elapsedTimeLabel.SetText(fmt.Sprintf("Elapsed Time: %.2f s", elapsed))
 			packetCountLabel.SetText(fmt.Sprintf("Packets Received: %d", *packetCount))
-			totalBytesLabel.SetText(fmt.Sprintf("Total Bytes: %d B", *totalBytesReceived))
-			avgJitterLabel.SetText(fmt.Sprintf("Avg Jitter: %.2f ms", *jittersum/float64(*packetCount)))
+			totalBytesLabel.SetText(fmt.Sprintf("Total Bytes: %d", *totalBytesReceived))
+			avgJitter := 0.0
+			if *packetCount > 0 {
+				avgJitter = *jittersum / float64(*packetCount)
+			}
+			avgJitterLabel.SetText(fmt.Sprintf("Avg Jitter: %.2f ms", avgJitter))
 			fpsLabel.SetText(fmt.Sprintf("FPS: %.2f", *fps))
-
 			statsMutex.Unlock()
 		}
 	}()
