@@ -120,11 +120,16 @@ func (ss *StreamingService) CheckInactiveClients(seconds time.Duration) {
 				ss.Logger.Error(fmt.Sprintf("Last seen %s:%d in %s since %d seconds", client.Ip, client.Port, video, seconds))
 				ss.RemoveUdpClient(video, *client)
 
-				// notifies the network
-				ss.SignalDead <- CallbackData{
-					Header: ss.PrepareMessageForDeadClient(video, *client),
-					Cancel: false,
-				}
+        if ss.UdpClients[video] != nil {
+          continue
+        }
+
+        // notifies the network
+        ss.SignalDead <- CallbackData{
+          Header: ss.PrepareMessageForDeadClient(video, *client),
+          Cancel: false,
+        }
+
 			}
 		}
 	}

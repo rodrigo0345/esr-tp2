@@ -18,160 +18,157 @@ import (
 	cnf "github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"google.golang.org/protobuf/proto"
-)
+  )
 
-type Statistics struct {
-	mu                 sync.Mutex
-	startTime          time.Time
-	dataPoints         []statDataPoint // Rolling window of stats
-	totalBytesReceived int64
-	totalSent          int
-	pathLabel          string
-}
+  type Statistics struct {
+    mu                 sync.Mutex
+    startTime          time.Time
+    dataPoints         []statDataPoint // Rolling window of stats
+    totalBytesReceived int64
+    totalSent          int
+    pathLabel          string
+  }
 
-type statDataPoint struct {
-	timestamp      time.Time
-	packetSize     int
-	sequenceNumber int
-	receivedTime   int64
-	sendTimestamp  int64
-}
+  type statDataPoint struct {
+    timestamp      time.Time
+    packetSize     int
+    sequenceNumber int
+    receivedTime   int64
+    sendTimestamp  int64
+  }
 
-// Maximum time window for metrics
-const rollingWindowSize = 5 * time.Second
+  // Maximum time window for metrics
+  const rollingWindowSize = 5 * time.Second
 
-func (s *Statistics) Reset() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.startTime = time.Now()
-	s.dataPoints = nil
-	s.totalBytesReceived = 0
-	s.totalSent = 0
-}
+  func (s *Statistics) Reset() {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    s.startTime = time.Now()
+    s.dataPoints = nil
+    s.totalBytesReceived = 0
+    s.totalSent = 0
+  }
 
-func (s *Statistics) AddDataPoint(receivedTime int64, sendTimestamp int64, sequenceNumber int, packetSize int, path string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+  func (s *Statistics) AddDataPoint(receivedTime int64, sendTimestamp int64, sequenceNumber int, packetSize int, path string) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
 
-	// Add new data point
-	now := time.Now()
-	s.dataPoints = append(s.dataPoints, statDataPoint{
-		timestamp:      now,
-		packetSize:     packetSize,
-		sequenceNumber: sequenceNumber,
-		receivedTime:   receivedTime,
-		sendTimestamp:  sendTimestamp,
-	})
-  s.pathLabel = path
-	s.totalBytesReceived += int64(packetSize)
-	s.totalSent = sequenceNumber
+    now := time.Now()
+    s.dataPoints = append(s.dataPoints, statDataPoint{
+      timestamp:      now,
+      packetSize:     packetSize,
+      sequenceNumber: sequenceNumber,
+      receivedTime:   receivedTime,
+      sendTimestamp:  sendTimestamp,
+    })
+    s.pathLabel = path
+    s.totalBytesReceived += int64(packetSize)
+    s.totalSent = sequenceNumber
 
-	// Remove old data points beyond the rolling window
-	cutoff := now.Add(-rollingWindowSize)
-	for len(s.dataPoints) > 0 && s.dataPoints[0].timestamp.Before(cutoff) {
-		s.dataPoints = s.dataPoints[1:]
-	}
-}
+    // Remove old data points beyond the rolling window
+    cutoff := now.Add(-rollingWindowSize)
+    for len(s.dataPoints) > 0 && s.dataPoints[0].timestamp.Before(cutoff) {
+      s.dataPoints = s.dataPoints[1:]
+    }
+  }
 
-func (s *Statistics) CalculateMetrics() (float64, int, float64, float64, float64, float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+  func (s *Statistics) CalculateMetrics() (float64, int, float64, float64, float64, float64) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
 
-	// Calculate metrics only for the last 5 seconds
-	now := time.Now()
-	cutoff := now.Add(-rollingWindowSize)
-	validDataPoints := 0
-	jitterSum := 0.0
-	prevDelay := 0.0
-	totalBytes := 0
-	firstSequence := -1
-	lastSequence := -1
+    now := time.Now()
+    cutoff := now.Add(-rollingWindowSize)
+    validDataPoints := 0
+    jitterSum := 0.0
+    prevDelay := 0.0
+    totalBytes := 0
+    firstSequence := -1
+    lastSequence := -1
 
-	for _, point := range s.dataPoints {
-		if point.timestamp.Before(cutoff) {
-			continue
-		}
-		validDataPoints++
-		totalBytes += point.packetSize
+    for _, point := range s.dataPoints {
+      if point.timestamp.Before(cutoff) {
+        continue
+      }
+      validDataPoints++
+      totalBytes += point.packetSize
 
-		// Track sequence numbers
-		if firstSequence == -1 || point.sequenceNumber < firstSequence {
-			firstSequence = point.sequenceNumber
-		}
-		if lastSequence == -1 || point.sequenceNumber > lastSequence {
-			lastSequence = point.sequenceNumber
-		}
+      if firstSequence == -1 || point.sequenceNumber < firstSequence {
+        firstSequence = point.sequenceNumber
+      }
+      if lastSequence == -1 || point.sequenceNumber > lastSequence {
+        lastSequence = point.sequenceNumber
+      }
 
-		// Delay and jitter
-		currentDelay := float64(point.receivedTime - point.sendTimestamp)
-		if lastSequence >= 0 {
-			jitter := math.Abs(currentDelay - prevDelay)
-			jitterSum += jitter
-		}
-		prevDelay = currentDelay
-	}
+      // Delay and jitter
+      currentDelay := float64(point.receivedTime - point.sendTimestamp)
+      if lastSequence >= 0 {
+        jitter := math.Abs(currentDelay - prevDelay)
+        jitterSum += jitter
+      }
+      prevDelay = currentDelay
+    }
 
-	// Calculate packet loss
-	totalPackets := lastSequence - firstSequence + 1
-	packetLoss := 0.0
-	if totalPackets > 0 {
-		packetLoss = float64(totalPackets-validDataPoints) / float64(totalPackets) * 100
-	}
+    // Calculate packet loss
+    totalPackets := lastSequence - firstSequence + 1
+    packetLoss := 0.0
+    if totalPackets > 0 {
+      packetLoss = float64(totalPackets-validDataPoints) / float64(totalPackets) * 100
+    }
 
-	// Calculate throughput in kilobits per second
-	throughput := float64(totalBytes) * 8 / rollingWindowSize.Seconds() / 1024.0 // Convert to kbps
+    // Calculate throughput in kilobits per second
+    throughput := float64(totalBytes) * 8 / rollingWindowSize.Seconds() / 1024.0 // Convert to kbps
 
-	// Calculate FPS
-	fps := float64(validDataPoints) / rollingWindowSize.Seconds()
+    // Calculate FPS
+    fps := float64(validDataPoints) / rollingWindowSize.Seconds()
 
-	// Average jitter
-	avgJitter := 0.0
-	if validDataPoints > 1 {
-		avgJitter = jitterSum / float64(validDataPoints-1)
-	}
+    // Average jitter
+    avgJitter := 0.0
+    if validDataPoints > 1 {
+      avgJitter = jitterSum / float64(validDataPoints-1)
+    }
 
-	// Elapsed time
-	elapsedTime := time.Since(s.startTime).Seconds()
+    // Elapsed time
+    elapsedTime := time.Since(s.startTime).Seconds()
 
-	return elapsedTime, validDataPoints, avgJitter, packetLoss, fps, throughput
-}
+    return elapsedTime, validDataPoints, avgJitter, packetLoss, fps, throughput
+  }
 
-type UI struct {
-	imgCanvas     *canvas.Image
-	pathLabel     *widget.Label
-	videoDropdown *widget.Select
-	targetEntry   *widget.Entry
-	sendButton    *widget.Button
-	cancelButton  *widget.Button
-	statsButton   *widget.Button
-	stats         *Statistics
-}
+  type UI struct {
+    imgCanvas     *canvas.Image
+    pathLabel     *widget.Label
+    videoDropdown *widget.Select
+    targetEntry   *widget.Entry
+    sendButton    *widget.Button
+    cancelButton  *widget.Button
+    statsButton   *widget.Button
+    stats         *Statistics
+  }
 
-func NewUI() *UI {
-	return &UI{
-		imgCanvas:     canvas.NewImageFromImage(nil),
-		pathLabel:     widget.NewLabel(""),
-		videoDropdown: widget.NewSelect([]string{"film", "demo"}, nil), // Dropdown menu
-		targetEntry:   widget.NewEntry(),
-		sendButton:    widget.NewButton("Send", nil),
-		cancelButton:  widget.NewButton("Stop", nil),
-		statsButton:   widget.NewButton("Statistics", nil),
-		stats:         &Statistics{startTime: time.Now()},
-	}
-}
+  func NewUI() *UI {
+    return &UI{
+      imgCanvas:     canvas.NewImageFromImage(nil),
+      pathLabel:     widget.NewLabel(""),
+      videoDropdown: widget.NewSelect([]string{"film", "demo"}, nil), // Dropdown menu
+      targetEntry:   widget.NewEntry(),
+      sendButton:    widget.NewButton("Send", nil),
+      cancelButton:  widget.NewButton("Stop", nil),
+      statsButton:   widget.NewButton("Statistics", nil),
+      stats:         &Statistics{startTime: time.Now()},
+    }
+  }
 
-func (ui *UI) UpdateImage(data []byte) {
-	imgReader := bytes.NewReader(data)
-	frame, err := jpeg.Decode(imgReader)
-	if err != nil {
-		log.Printf("Error decoding JPEG: %s\n", err)
-		return
-	}
-	ui.imgCanvas.Image = frame
-	ui.imgCanvas.Refresh()
-}
+  func (ui *UI) UpdateImage(data []byte) {
+    imgReader := bytes.NewReader(data)
+    frame, err := jpeg.Decode(imgReader)
+    if err != nil {
+      log.Printf("Error decoding JPEG: %s\n", err)
+      return
+    }
+    ui.imgCanvas.Image = frame
+    ui.imgCanvas.Refresh()
+  }
 
-func (ui *UI) ShowStatsWindow(app fyne.App) {
+  func (ui *UI) ShowStatsWindow(app fyne.App) {
 	statsWindow := app.NewWindow("Statistics")
 	statsWindow.Resize(fyne.NewSize(400, 300))
 

@@ -156,15 +156,6 @@ func (ss *ServerSystem) ListenForClients() {
 
 				case protobuf.RequestType_RETRANSMIT:
 
-					// check if the message is for this server
-					/* if header.GetTarget() != ss.PresenceSystem.Config.NodeName {
-						ss.Logger.Error(fmt.Sprintf("Received message for %s, but this is %s\n", header.GetTarget(), ss.PresenceSystem.Config.NodeName))
-						ss.Logger.Info(fmt.Sprintf("Trying to retransmit to %s\n", header.GetTarget()))
-
-						presence.HandleRetransmitFromClient(ss.PresenceSystem, header)
-						return
-					}*/
-
 					if header.GetClientCommand() == nil {
 						return
 					}
@@ -395,10 +386,8 @@ type ServerMetrics struct {
 	PreviousBitrateKbps int32
 }
 
-// collectMetrics parses ffmpeg's stderr output to extract metrics
 func collectMetrics(reader *bufio.Reader, metricsChan chan<- ServerMetrics) {
-	// Regular expressions to match ffmpeg's metric output
-	// Example ffmpeg stderr output line: "frame=  240 fps=25 q=28.0 size=    1024kB time=00:00:10.00 bitrate= 838.9kbits/s speed=1.00x"
+	// ffmpeg stderr output line: "frame=  240 fps=25 q=28.0 size=    1024kB time=00:00:10.00 bitrate= 838.9kbits/s speed=1.00x"
 	frameRegex := regexp.MustCompile(`frame=\s*(\d+).*fps=([\d.]+).*size=\s*(\d+)kB.*bitrate=\s*([\d.]+)kbits/s`)
 	timeRegex := regexp.MustCompile(`time=(\d+:\d+:\d+\.\d+)`)
 
@@ -419,41 +408,25 @@ func collectMetrics(reader *bufio.Reader, metricsChan chan<- ServerMetrics) {
 
 		// Parse frame metrics
 		if matches := frameRegex.FindStringSubmatch(line); matches != nil {
-			// frameNumber, _ := strconv.Atoi(matches[1])
 			fps, _ := strconv.ParseFloat(matches[2], 64)
-			// sizeKB, _ := strconv.Atoi(matches[3])
 			bitrate, _ := strconv.ParseFloat(matches[4], 64)
-
-			// Example calculation for latency (requires additional implementation)
-			latencyMs := calculateLatency()
 
 			metrics := ServerMetrics{
 				BitrateKbps:         int32(bitrate),
 				Fps:                 fps,
-				LatencyMs:           latencyMs,
 				CurrentBitrateKbps:  int32(bitrate),
 				PreviousBitrateKbps: int32(previousBitrate),
 			}
 
-			// Update previous bitrate
 			previousBitrate = bitrate
 
 			metricsChan <- metrics
 		}
 
-		// Optionally, parse other metrics like time or resolution if available
-		if matches := timeRegex.FindStringSubmatch(line); matches != nil {
-			// Implement parsing if needed
-		}
+		if matches := timeRegex.FindStringSubmatch(line); matches != nil {}
 	}
 }
 
-// calculateLatency is a placeholder for latency calculation logic
-func calculateLatency() int64 {
-	// Implement latency calculation logic here
-	// This could involve tracking timestamps when frames are sent and received
-	return 0 // Placeholder value
-}
 
 // Helper function to read a frame from the ffmpeg output
 func readFrame(reader *bufio.Reader) ([]byte, error) {

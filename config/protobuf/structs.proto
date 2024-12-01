@@ -60,19 +60,18 @@ enum PlayerCommand {
 }
 
 message ServerVideoChunk {
-  int32 sequence_number = 1; // Order of this chunk in the video stream
-  int64 timestamp = 2;       // Timestamp of the chunk in milliseconds
-  VideoFormat format = 3;    // Video format (MP4, MKV, etc.)
-  bytes data = 4;            // The raw video chunk data (as byte array)
-  bool is_last_chunk = 5;    // Flag to indicate if this is the last chunk
+  int32 sequence_number = 1; 
+  int64 timestamp = 2;       
+  VideoFormat format = 3;    
+  bytes data = 4;           
+  bool is_last_chunk = 5;    
 
-  int32 bitrate_kbps = 6;          // Bitrate in kilobits per second
-  int32 width = 7;                  // Width of the video in pixels
-  int32 height = 8;                 // Height of the video in pixels
-  double fps = 9;                   // Frames per second
-  int64 latency_ms = 10;            // Latency in milliseconds (if measurable)
-  int32 current_bitrate_kbps = 11;  // Current bitrate in kilobits per second
-  int32 previous_bitrate_kbps = 12; // Previous bitrate before adaptation
+  int32 bitrate_kbps = 6;       
+  int32 width = 7;               
+  int32 height = 8;               
+  double fps = 9;                  
+  int32 current_bitrate_kbps = 11;  
+  int32 previous_bitrate_kbps = 12;
 }
 
 enum VideoFormat {

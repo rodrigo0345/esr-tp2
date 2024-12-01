@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Serve para receber a routing table de outro nó
 func HandleRouting(ps *PresenceSystem, conn quic.Connection, stream quic.Stream, header *protobuf.Header) {
 
 	// the source needs to be updated only when sending the routing table
