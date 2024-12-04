@@ -14,10 +14,12 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+	"fyne.io/fyne/v2/theme"
 	"github.com/rodrigo0345/esr-tp2/config"
 	cnf "github.com/rodrigo0345/esr-tp2/config"
 	"github.com/rodrigo0345/esr-tp2/config/protobuf"
 	"google.golang.org/protobuf/proto"
+
   )
 
   type Statistics struct {
@@ -230,22 +232,24 @@ func StartUI(bestPopAddr string, cnf *cnf.AppConfigList, uiChannel <-chan *proto
 	ui.targetEntry.SetPlaceHolder("Enter target")
 
 	// Button actions
-	ui.sendButton.OnTapped = func() {
-		if ui.videoDropdown.Selected == "" {
-			log.Println("Please select a video before sending.")
-			return
-		}
-		sendCommand("PLAY", ui.videoDropdown.Selected, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
-	}
-	ui.cancelButton.OnTapped = func() {
-		sendCommand("STOP", ui.videoDropdown.Selected, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
-	}
-	ui.statsButton.OnTapped = func() {
-		ui.ShowStatsWindow(myApp)
-	}
+ui.sendButton = widget.NewButtonWithIcon("Send", theme.ConfirmIcon(), func() {
+    if ui.videoDropdown.Selected == "" {
+        log.Println("Please select a video before sending.")
+        return
+    }
+    sendCommand("PLAY", ui.videoDropdown.Selected, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
+})
+
+ui.cancelButton = widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), func() {
+    sendCommand("STOP", ui.videoDropdown.Selected, ui.targetEntry.Text, bestPopAddr, cnf, ui.stats)
+})
+
+ui.statsButton = widget.NewButtonWithIcon("Stats", theme.InfoIcon(), func() {
+    ui.ShowStatsWindow(myApp)
+})
 
 	// Arrange buttons horizontally
-	buttons := container.NewHBox(ui.sendButton, ui.cancelButton, ui.statsButton)
+  buttons := container.NewGridWithColumns(3, ui.sendButton, ui.cancelButton, ui.statsButton)
 
 	// Place other controls in a vertical container
 	controls := container.NewVBox(ui.videoDropdown, ui.targetEntry, buttons, ui.pathLabel)
