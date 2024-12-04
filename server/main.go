@@ -6,7 +6,7 @@ import (
 
 func Server(cnf *config.AppConfigList) {
 	serverSystem := NewServerSystem(cnf)
-	go serverSystem.HeartBeatNeighbors(5)
+	go serverSystem.HeartBeatNeighbors(2)
 	go serverSystem.BackgroundStreaming()
   go serverSystem.BsClients()
 	serverSystem.ListenForClients()

@@ -42,8 +42,16 @@ func (ss *StreamingService) Stop(video Video, udpClient *protobuf.Interface, cal
 
   ss.RemoveUdpClient(video, client)
 
+  if ss.UdpClients[video] == nil {
+    callback <- CallbackData {
+      Header: msg,
+      Cancel: false,
+    }
+    return 
+  }
+
   callback <- CallbackData {
     Header: msg,
-    Cancel: false,
+    Cancel: true,
   }
 }
