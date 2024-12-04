@@ -125,6 +125,8 @@ func SplitTargets(targets []string, routingTable *dvr.DistanceVectorRouting, pac
 		header := &protobuf.Header{
 			Type:           packet.Type,
 			Length:         packet.Length,
+      Hops:           packet.Hops,
+      MaxHops:        packet.MaxHops,
 			Timestamp:      packet.Timestamp,
 			Sender:         packet.Sender,
 			Target:         targets, // Assign the specific targets for this next hop.
